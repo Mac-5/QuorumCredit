@@ -5,6 +5,7 @@ use soroban_sdk::{
 
 pub mod admin;
 pub mod batch_transfer;
+pub mod bridge;
 pub mod cache;
 pub mod cooldown_bypass;
 pub mod credit_score;
@@ -130,6 +131,7 @@ impl QuorumCreditContract {
                 redistribution_rule: RedistributionRule::Treasury,
                 immunity_period_seconds: 0,
                 insurance_premium_bps: 0,
+                liquidity_tier_yield_bonus: Vec::new(&env),
             },
         );
 
@@ -152,7 +154,10 @@ impl QuorumCreditContract {
         token: Address,
         chain_id: Option<u32>,
     ) -> Result<(), ContractError> {
-        vouch::vouch(env, voucher, borrower, stake, token, chain_id)
+        acquire_lock(&env)?;
+        let result = vouch::vouch(env.clone(), voucher, borrower, stake, token, chain_id);
+        release_lock(&env);
+        result
     }
 
     /// Issue #632: Vouch with cross-chain support.
@@ -509,7 +514,10 @@ impl QuorumCreditContract {
         loan_purpose: soroban_sdk::String,
         token: Address,
     ) -> Result<(), ContractError> {
-        loan::request_loan(env, borrower, amount, threshold, loan_purpose, token)
+        acquire_lock(&env)?;
+        let result = loan::request_loan(env.clone(), borrower, amount, threshold, loan_purpose, token);
+        release_lock(&env);
+        result
     }
 
     /// Confidential loan request with zk-SNARK proof verification
@@ -657,7 +665,10 @@ impl QuorumCreditContract {
     }
 
     pub fn repay(env: Env, borrower: Address, payment: i128) -> Result<(), ContractError> {
-        loan::repay(env, borrower, payment)
+        acquire_lock(&env)?;
+        let result = loan::repay(env.clone(), borrower, payment);
+        release_lock(&env);
+        result
     }
 
 
@@ -2197,6 +2208,81 @@ impl QuorumCreditContract {
     pub fn get_contract_balance(env: Env) -> i128 {
         token(&env).balance(&env.current_contract_address())
     }
+
+    // ── Issue #1074: Reentrancy guard — already wired into vouch / request_loan / repay above ──
+
+    // ── Issue #1075: Bridge token support ────────────────────────────────────
+
+    /// Bridge external tokens (e.g. USDC) into the contract for staking.
+    ///
+    /// Transfers `amount` of `source_token` from `caller` to this contract.
+    /// The bridged balance is tracked in `DataKey::BridgedTokens(source_token)`.
+    /// Bridged tokens earn base yield **plus** a tier bonus (see #1077).
+    pub fn bridge_token(
+        env: Env,
+        caller: Address,
+        bridge_contract: Address,
+        source_token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        bridge::bridge_token(env, caller, bridge_contract, source_token, amount)
+    }
+
+    /// Query the bridged-token balance held by the contract for a given token address.
+    pub fn get_bridged_token_balance(env: Env, token_addr: Address) -> i128 {
+        bridge::get_bridged_token_balance(env, token_addr)
+    }
+
+    /// Admin: set the oracle price (in basis points) for a bridge token relative
+    /// to the primary token. Used by `repay_with_swap` for cross-token conversion.
+    pub fn set_bridge_token_price(
+        env: Env,
+        admin_signers: Vec<Address>,
+        token_addr: Address,
+        price_bps: i128,
+    ) -> Result<(), ContractError> {
+        bridge::set_bridge_token_price(env, admin_signers, token_addr, price_bps)
+    }
+
+    // ── Issue #1076: Token swap on repayment mismatch ─────────────────────────
+
+    /// Repay a loan using a different token than the loan's denomination.
+    ///
+    /// Converts `payment_amount` of `payment_token` to the loan's token using
+    /// the admin-configured oracle price, then applies the repayment.
+    ///
+    /// Falls back to normal repay if `payment_token == loan.token_address`.
+    pub fn repay_with_swap(
+        env: Env,
+        borrower: Address,
+        payment_token: Address,
+        payment_amount: i128,
+    ) -> Result<(), ContractError> {
+        bridge::repay_with_swap(env, borrower, payment_token, payment_amount)
+    }
+
+    // ── Issue #1077: Dynamic yield based on token liquidity ───────────────────
+
+    /// Return the liquidity tier (0–3) for a given token address.
+    ///
+    /// Tier 0 = highly liquid (e.g. XLM, no bonus).
+    /// Tier 3 = illiquid (highest yield bonus, default +300 bps).
+    pub fn get_token_liquidity_tier(env: Env, token_addr: Address) -> u32 {
+        bridge::get_token_liquidity_tier(env, token_addr)
+    }
+
+    /// Admin: set the liquidity tier (0–3) for a given token address.
+    ///
+    /// Higher tiers earn more yield to compensate for liquidity risk.
+    pub fn set_token_liquidity_tier(
+        env: Env,
+        admin_signers: Vec<Address>,
+        token_addr: Address,
+        tier: u32,
+    ) -> Result<(), ContractError> {
+        bridge::set_token_liquidity_tier(env, admin_signers, token_addr, tier)
+    }
+
     pub fn make_periodic_payment(env: Env, borrower: Address, loan_id: u64, payment: i128) -> Result<(), ContractError> {
         crate::make_periodic_payment(env, borrower, loan_id, payment)
     }

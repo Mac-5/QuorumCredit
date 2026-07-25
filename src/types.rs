@@ -773,6 +773,15 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Issue #1075: Bridge token balances ───────────────────────────────────
+    /// Bridged token balance: token_addr → i128
+    BridgedTokens(Address),
+    // ── Issue #1075: Oracle price for bridge tokens ──────────────────────────
+    /// Token price in basis points relative to primary token: token_addr → i128
+    BridgeTokenPrice(Address),
+    // ── Issue #1077: Liquidity tier per token ────────────────────────────────
+    /// Liquidity tier (0-3) for a token address: token_addr → u32
+    TokenLiquidityTier(Address),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -1511,6 +1520,10 @@ pub struct Config {
     /// Seconds after repayment during which a borrower is immune from slash votes (0 = disabled).
     pub immunity_period_seconds: u64,
     pub insurance_premium_bps: u32,
+    /// Issue #1077: Per-liquidity-tier yield bonus in basis points.
+    /// Index 0 = Tier 0 (most liquid, no bonus), 3 = Tier 3 (illiquid, max bonus).
+    /// Example: [0, 50, 150, 300] means tier-3 tokens earn +300 bps extra yield.
+    pub liquidity_tier_yield_bonus: Vec<i128>,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────

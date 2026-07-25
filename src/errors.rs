@@ -244,4 +244,14 @@ EmergencyBypassNotAuthorised = 131,
     InvariantViolation = 178,
     /// The withdrawal queue has reached its maximum size.
     WithdrawalQueueFull = 179,
+    /// Flash loan was not repaid within the same transaction block.
+    FlashLoanNotRepaid = 180,
+    /// Insufficient contract balance for the requested flash loan.
+    InsufficientFlashFunds = 181,
+    /// Per-contract flash loan borrowing cap has been exceeded.
+    FlashLoanCapExceeded = 182,
+    /// Invalid fee amount for flash loan repayment.
+    InvalidFeeAmount = 183,
+    /// NotFound error for records not in storage.
+    NotFound = 184,
 }

@@ -773,6 +773,13 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Flash Loans (Issue #1183) ──────────────────────────────────────────────
+    /// FlashLoanStats: aggregate flash loan volume and fee statistics
+    FlashLoanStats,
+    /// Vec<FlashLoanRecord>: flash loan operation history
+    FlashLoanHistory,
+    /// Address → PerContractCap: per-contract borrowing caps and tracking
+    FlashLoanPerContractCap(Address),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.

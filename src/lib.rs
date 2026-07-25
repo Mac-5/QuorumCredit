@@ -12,6 +12,7 @@ pub mod cross_chain;
 pub mod detection;
 pub mod diversification;
 pub mod errors;
+pub mod flash_loan;
 pub mod governance;
 pub mod helpers;
 pub mod insurance;
@@ -37,6 +38,8 @@ mod interest_test;
 mod invariants_test;
 #[cfg(test)]
 mod property_based_invariants_test;
+#[cfg(test)]
+mod concurrent_operations_test;
 #[cfg(test)]
 mod loan_purpose_test;
 #[cfg(test)]
@@ -2997,5 +3000,45 @@ impl QuorumCreditContract {
 
     pub fn is_bridge_nonce_used(env: Env, origin_chain: u32, nonce: u64) -> bool {
         cross_chain::is_bridge_nonce_used(env, origin_chain, nonce)
+    }
+
+    // ── Flash Loans (Issue #1183) ─────────────────────────────────────────────
+
+    pub fn flash_loan(
+        env: Env,
+        amount: i128,
+        callback_contract: Address,
+        callback_data: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        flash_loan::flash_loan(&env, amount, callback_contract, callback_data)
+    }
+
+    pub fn repay_flash_loan(
+        env: Env,
+        borrower: Address,
+        principal: i128,
+        fee: i128,
+    ) -> Result<(), ContractError> {
+        flash_loan::repay_flash_loan(&env, borrower, principal, fee)
+    }
+
+    pub fn get_flash_loan_stats(env: Env) -> Result<flash_loan::FlashLoanStats, ContractError> {
+        flash_loan::get_flash_loan_stats(&env)
+    }
+
+    pub fn get_total_flash_loan_volume(env: Env) -> Result<i128, ContractError> {
+        flash_loan::get_total_flash_loan_volume(&env)
+    }
+
+    pub fn get_total_flash_loan_fees(env: Env) -> Result<i128, ContractError> {
+        flash_loan::get_total_flash_loan_fees(&env)
+    }
+
+    pub fn get_flash_loan_count(env: Env) -> Result<u64, ContractError> {
+        flash_loan::get_flash_loan_count(&env)
+    }
+
+    pub fn check_per_contract_cap(env: Env, contract: Address) -> Result<i128, ContractError> {
+        flash_loan::check_per_contract_cap(&env, &contract)
     }
 }

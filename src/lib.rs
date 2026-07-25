@@ -28,6 +28,7 @@ pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
 pub mod economic_simulation;
+pub mod loan_tokenization;
 
 #[cfg(test)]
 mod governance_test;
@@ -3018,5 +3019,88 @@ impl QuorumCreditContract {
         };
 
         economic_simulation::stress_test_scenarios(&params, seed)
+    }
+
+    // ── Loan Tokenization (Issue #1185) ───────────────────────────────────────────
+
+    pub fn tokenize_loan_interest(
+        env: Env,
+        loan_id: u64,
+        initial_supply: i128,
+        token_contract: Address,
+    ) -> Result<loan_tokenization::LoanToken, ContractError> {
+        loan_tokenization::tokenize_loan_interest(&env, loan_id, initial_supply, token_contract)
+    }
+
+    pub fn distribute_interest_to_holders(
+        env: Env,
+        token_id: u64,
+        interest_amount: i128,
+    ) -> Result<loan_tokenization::InterestDistribution, ContractError> {
+        loan_tokenization::distribute_interest_to_holders(&env, token_id, interest_amount)
+    }
+
+    pub fn record_token_price(
+        env: Env,
+        token_id: u64,
+        price: i128,
+        volume: i128,
+    ) -> Result<loan_tokenization::TokenPriceRecord, ContractError> {
+        loan_tokenization::record_token_price(&env, token_id, price, volume)
+    }
+
+    pub fn create_market_order(
+        env: Env,
+        seller: Address,
+        token_id: u64,
+        price_per_token: i128,
+        amount: i128,
+    ) -> Result<loan_tokenization::MarketOrder, ContractError> {
+        loan_tokenization::create_market_order(&env, seller, token_id, price_per_token, amount)
+    }
+
+    pub fn cancel_market_order(
+        env: Env,
+        order_id: u64,
+    ) -> Result<(), ContractError> {
+        loan_tokenization::cancel_market_order(&env, order_id)
+    }
+
+    pub fn get_active_market_orders(
+        env: Env,
+        token_id: u64,
+    ) -> Vec<loan_tokenization::MarketOrder> {
+        loan_tokenization::get_active_market_orders(&env, token_id)
+    }
+
+    pub fn get_token_price_history(
+        env: Env,
+        token_id: u64,
+        limit: u32,
+    ) -> Vec<loan_tokenization::TokenPriceRecord> {
+        loan_tokenization::get_token_price_history(&env, token_id, limit)
+    }
+
+    pub fn calculate_average_token_price(
+        env: Env,
+        token_id: u64,
+        periods: u32,
+    ) -> Result<i128, ContractError> {
+        loan_tokenization::calculate_average_price(&env, token_id, periods)
+    }
+
+    pub fn register_token_holder(
+        env: Env,
+        token_id: u64,
+        holder: Address,
+    ) -> Result<(), ContractError> {
+        loan_tokenization::register_token_holder(&env, token_id, holder)
+    }
+
+    pub fn get_loan_token(
+        env: Env,
+        token_id: u64,
+    ) -> Result<loan_tokenization::LoanToken, ContractError> {
+        loan_tokenization::get_loan_token(&env, token_id)
     }
 }

@@ -21,6 +21,7 @@ pub mod maturity;
 pub mod merkle_tree;
 pub mod rbac;
 pub mod reputation;
+pub mod social;
 pub mod types;
 pub mod vouch;
 pub mod zk_snarks;
@@ -1411,6 +1412,106 @@ impl QuorumCreditContract {
         token: Address,
     ) -> Result<i128, ContractError> {
         maturity::get_total_interest_bonus(&env, &voucher, &borrower, &token)
+    }
+
+    // ── Issue #1176: Social Features for Borrower Network ────────────────────
+
+    /// Set or update a borrower's profile (Issue #1176).
+    /// Allows borrowers to create their community profile with bio and sector info.
+    pub fn set_borrower_profile(
+        env: Env,
+        borrower: Address,
+        bio: String,
+        sector: Option<String>,
+        region: Option<String>,
+    ) -> Result<(), ContractError> {
+        borrower.require_auth();
+        social::set_borrower_profile(&env, borrower, bio, sector, region)
+    }
+
+    /// Get a borrower's profile (Issue #1176).
+    pub fn get_borrower_profile(
+        env: Env,
+        borrower: Address,
+    ) -> Result<crate::types::BorrowerProfile, ContractError> {
+        social::get_borrower_profile(env, borrower)
+    }
+
+    /// Set whether borrower consents to share success stories (Issue #1176).
+    pub fn set_success_story_consent(
+        env: Env,
+        borrower: Address,
+        consent: bool,
+    ) -> Result<(), ContractError> {
+        borrower.require_auth();
+        social::set_success_story_consent(&env, borrower, consent)
+    }
+
+    /// Submit a success story (Issue #1176).
+    /// Returns the story ID for reference.
+    pub fn submit_success_story(
+        env: Env,
+        borrower: Address,
+        title: String,
+        content: String,
+    ) -> Result<u64, ContractError> {
+        borrower.require_auth();
+        social::submit_success_story(&env, borrower, title, content)
+    }
+
+    /// Publish a success story (Issue #1176).
+    /// Only the borrower who submitted can publish.
+    pub fn publish_success_story(
+        env: Env,
+        borrower: Address,
+        story_id: u64,
+    ) -> Result<(), ContractError> {
+        borrower.require_auth();
+        social::publish_success_story(&env, borrower, story_id)
+    }
+
+    /// Get a success story (Issue #1176).
+    pub fn get_success_story(
+        env: Env,
+        story_id: u64,
+    ) -> Result<crate::types::SuccessStory, ContractError> {
+        social::get_success_story(env, story_id)
+    }
+
+    /// Get all success stories for a borrower (Issue #1176).
+    pub fn get_borrower_success_stories(
+        env: Env,
+        borrower: Address,
+    ) -> Result<Vec<crate::types::SuccessStory>, ContractError> {
+        social::get_borrower_success_stories(env, borrower)
+    }
+
+    /// Get retention metrics for a borrower (Issue #1176).
+    /// Tracks loan activity, repayment success, and platform engagement.
+    pub fn get_retention_metrics(
+        env: Env,
+        borrower: Address,
+    ) -> Result<crate::types::RetentionMetrics, ContractError> {
+        social::get_retention_metrics(env, borrower)
+    }
+
+    /// Find similar borrowers for peer discovery (Issue #1176).
+    /// Returns borrowers with similar sector/region characteristics.
+    pub fn find_similar_borrowers(
+        env: Env,
+        borrower: Address,
+        limit: u32,
+    ) -> Result<Vec<crate::types::BorrowerProfile>, ContractError> {
+        social::find_similar_borrowers(env, borrower, limit)
+    }
+
+    /// Calculate engagement score for a borrower (Issue #1176).
+    /// Returns a score 0-100 based on loan activity and retention metrics.
+    pub fn calculate_engagement_score(
+        env: Env,
+        borrower: Address,
+    ) -> Result<u32, ContractError> {
+        social::calculate_engagement_score(env, borrower)
     }
 
     /// Total number of borrowers ever registered (Issue #1146). Ground truth

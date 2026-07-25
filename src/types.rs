@@ -781,6 +781,19 @@ pub enum DataKey {
     // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────
     /// (borrower, voucher, token) → VouchMaturityRecord (tracks maturity-based interest bonuses)
     VouchMaturity(Address, Address, Address),
+    // ── Issue #1176: Social Features ─────────────────────────────────────────
+    /// borrower → BorrowerProfile (social profile for community features)
+    BorrowerProfile(Address),
+    /// borrower → Vec<u64> (list of success story IDs)
+    BorrowerSuccessStories(Address),
+    /// story_id → SuccessStory (individual success story)
+    SuccessStory(u64),
+    /// Monotonically increasing counter for success story IDs
+    SuccessStoryIdCounter,
+    /// borrower → RetentionMetrics (engagement and retention tracking)
+    BorrowerRetentionMetrics(Address),
+    /// Monotonically increasing counter for retention metric updates
+    RetentionMetricsUpdateCounter,
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2470,6 +2483,70 @@ pub struct ConfigPatch {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ScheduleType {
     Dummy,
+}
+
+// ── Issue #1176: Social Features for Borrower Network ──────────────────────
+
+/// Borrower profile information for social features and community building.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerProfile {
+    /// Borrower address.
+    pub borrower: Address,
+    /// Short bio/description of the borrower (max 500 chars).
+    pub bio: soroban_sdk::String,
+    /// Timestamp when profile was created.
+    pub created_at: u64,
+    /// Timestamp of last profile update.
+    pub updated_at: u64,
+    /// Sector/industry category for peer discovery (e.g., "agriculture", "retail", "tech").
+    pub sector: Option<soroban_sdk::String>,
+    /// Country/region for geographic peer discovery.
+    pub region: Option<soroban_sdk::String>,
+    /// Whether borrower has agreed to share success story publicly.
+    pub success_story_consent: bool,
+}
+
+/// Success story submitted by a borrower about their lending experience.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SuccessStory {
+    /// Borrower who submitted the story.
+    pub borrower: Address,
+    /// Story title (max 100 chars).
+    pub title: soroban_sdk::String,
+    /// Story content (max 2000 chars).
+    pub content: soroban_sdk::String,
+    /// Timestamp when story was submitted.
+    pub submitted_at: u64,
+    /// Unique story ID for reference.
+    pub story_id: u64,
+    /// Whether the story is published/visible to community.
+    pub is_published: bool,
+}
+
+/// Retention metrics for measuring user engagement and platform loyalty.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetentionMetrics {
+    /// Borrower address.
+    pub borrower: Address,
+    /// Total number of loans originated by this borrower.
+    pub total_loans: u32,
+    /// Total number of successful repayments.
+    pub successful_repayments: u32,
+    /// Total number of defaults.
+    pub defaults: u32,
+    /// Number of distinct vouchers this borrower has used.
+    pub distinct_vouchers_count: u32,
+    /// Timestamp of first loan.
+    pub first_loan_timestamp: u64,
+    /// Timestamp of most recent loan.
+    pub last_loan_timestamp: u64,
+    /// Average time between loans (in seconds, 0 if only one loan).
+    pub average_loan_interval: u64,
+    /// Platform tenure (time since first loan, in seconds).
+    pub platform_tenure: u64,
 }
 
 // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ─────────────────

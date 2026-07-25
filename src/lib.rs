@@ -119,6 +119,7 @@ impl QuorumCreditContract {
                     window_secs: DEFAULT_RATE_LIMIT_WINDOW_SECS,
                     max_calls: DEFAULT_RATE_LIMIT_COUNT,
                     enabled: false,
+                    tiers: Vec::new(&env),
                 },
                 multi_tier_thresholds: Vec::new(&env),                dynamic_slash_threshold: DEFAULT_DYNAMIC_SLASH_THRESHOLD,
                 loan_size_slash_enabled: DEFAULT_LOAN_SIZE_SLASH_ENABLED,
@@ -1390,6 +1391,36 @@ impl QuorumCreditContract {
         loan::loan_status_extended(env, borrower)
     }
 
+    /// Issue #1078: Batch query loan statuses for multiple borrowers.
+    /// Returns results in the order of the input borrowers vector, with a 100-borrower limit.
+    pub fn batch_loan_status(
+        env: Env,
+        borrowers: Vec<Address>,
+    ) -> Result<Vec<BatchLoanStatusResult>, ContractError> {
+        if borrowers.is_empty() {
+            return Err(ContractError::InsufficientFunds);
+        }
+        if borrowers.len() > 100 {
+            return Err(ContractError::InsufficientFunds);
+        }
+
+        let mut results: Vec<BatchLoanStatusResult> = Vec::new(&env);
+        for borrower in borrowers.iter() {
+            let status = helper_loan_status(&env, &borrower);
+            results.push_back(BatchLoanStatusResult {
+                borrower: borrower.clone(),
+                status,
+            });
+
+            env.events().publish(
+                (symbol_short!("bloan"), symbol_short!("query")),
+                (borrower.clone(), status as u32),
+            );
+        }
+
+        Ok(results)
+    }
+
     pub fn suspend_loan_on_missed_payment(
         env: Env,
         caller: Address,
@@ -2303,6 +2334,149 @@ impl QuorumCreditContract {
 
     pub fn get_config_patch_count(env: Env) -> u32 {
         admin::get_config_patch_count(env)
+    }
+
+    // ── Issue #1080: Request Idempotency Support ────────────────────────────────
+
+    /// Check or store an idempotency key for request deduplication.
+    /// Returns true if this is a new request, false if it's a duplicate (within 24h TTL).
+    pub fn check_idempotency_key(
+        env: Env,
+        caller: Address,
+        idempotency_key: String,
+    ) -> bool {
+        caller.require_auth();
+
+        let key = DataKey::IdempotencyKey(idempotency_key.clone());
+        let current_time = env.ledger().timestamp();
+        let ttl_24h = 24 * 60 * 60;
+
+        if let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, IdempotencyRecord>(&key)
+        {
+            if current_time < record.created_at + ttl_24h {
+                env.events().publish(
+                    (symbol_short!("idem"), symbol_short!("dup")),
+                    (caller, idempotency_key),
+                );
+                return false;
+            }
+        }
+
+        let new_record = IdempotencyRecord {
+            key: idempotency_key.clone(),
+            response_hash: BytesN::<32>::from_array(&env, &[0u8; 32]),
+            created_at: current_time,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::IdempotencyKey(idempotency_key.clone()), &new_record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::IdempotencyKey(idempotency_key), ttl_24h, ttl_24h);
+
+        env.events().publish(
+            (symbol_short!("idem"), symbol_short!("new")),
+            (caller, idempotency_key),
+        );
+
+        true
+    }
+
+    // ── Issue #1081: Role-Based Rate Limiting ───────────────────────────────────
+
+    /// Set up role-based rate limit tiers (admin: unlimited, user: 1000/hr, guest: 100/hr).
+    pub fn setup_role_based_rate_limits(env: Env, admin_signers: Vec<Address>) {
+        require_admin_approval(&env, &admin_signers).unwrap();
+
+        let mut cfg = config(&env);
+        let mut tiers: Vec<RateLimitTier> = Vec::new(&env);
+
+        tiers.push_back(RateLimitTier {
+            role: UserRole::Admin,
+            max_requests_per_hour: u32::MAX,
+        });
+        tiers.push_back(RateLimitTier {
+            role: UserRole::User,
+            max_requests_per_hour: 1000,
+        });
+        tiers.push_back(RateLimitTier {
+            role: UserRole::Guest,
+            max_requests_per_hour: 100,
+        });
+
+        cfg.rate_limit_config.tiers = tiers;
+        cfg.rate_limit_config.enabled = true;
+
+        env.storage().instance().set(&DataKey::Config, &cfg);
+
+        env.events().publish(
+            (symbol_short!("ratelim"), symbol_short!("setup")),
+            ("setup_role_based_rate_limits", u32::MAX, 1000, 100),
+        );
+    }
+
+    /// Check rate limit for a specific user by their role. Returns true if under limit.
+    pub fn check_rate_limit(
+        env: Env,
+        user: Address,
+        role: UserRole,
+    ) -> bool {
+        let cfg = config(&env);
+
+        if !cfg.rate_limit_config.enabled {
+            return true;
+        }
+
+        let current_time = env.ledger().timestamp();
+        let window_secs = 60 * 60;
+
+        let rate_key = DataKey::RateLimitByRole(user.clone(), role.clone());
+
+        let mut max_requests = 100u32;
+        for tier in cfg.rate_limit_config.tiers.iter() {
+            if tier.role == role {
+                max_requests = tier.max_requests_per_hour;
+                break;
+            }
+        }
+
+        if role == UserRole::Admin {
+            return true;
+        }
+
+        if let Some((last_window, count)) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, (u64, u32)>(&rate_key)
+        {
+            if current_time < last_window + window_secs {
+                if count >= max_requests {
+                    env.events().publish(
+                        (symbol_short!("ratelim"), symbol_short!("exceeded")),
+                        (user, role as u32, count),
+                    );
+                    return false;
+                }
+                env.storage()
+                    .persistent()
+                    .set(&rate_key, &(last_window, count + 1));
+            } else {
+                env.storage().persistent().set(&rate_key, &(current_time, 1));
+            }
+        } else {
+            env.storage().persistent().set(&rate_key, &(current_time, 1));
+        }
+
+        env.events().publish(
+            (symbol_short!("ratelim"), symbol_short!("ok")),
+            (user, role as u32),
+        );
+
+        true
     }
 }
 

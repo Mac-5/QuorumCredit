@@ -156,10 +156,26 @@ pub const MAX_PRIORITY_FEE_BPS: i128 = 1_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UserRole {
+    Admin,
+    User,
+    Guest,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateLimitTier {
+    pub role: UserRole,
+    pub max_requests_per_hour: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RateLimitConfig {
     pub window_secs: u64,
     pub max_calls: u32,
     pub enabled: bool,
+    pub tiers: Vec<RateLimitTier>,
 }
 
 #[contracttype]
@@ -773,6 +789,12 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Issue #1080: Idempotency Support ────────────────────────────────────────
+    /// idempotency_key → IdempotencyRecord (tracks request deduplication)
+    IdempotencyKey(String),
+    // ── Issue #1081: Role-based Rate Limiting ───────────────────────────────────
+    /// (address, role) → (u64 last_window_start, u32 call_count)
+    RateLimitByRole(Address, UserRole),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2229,6 +2251,21 @@ pub struct BatchVouchResult {
     pub success: bool,
     /// Error code if `success == false`; `None` when successful.
     pub error_code: Option<u32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchLoanStatusResult {
+    pub borrower: Address,
+    pub status: LoanStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdempotencyRecord {
+    pub key: String,
+    pub response_hash: BytesN<32>,
+    pub created_at: u64,
 }
 
 #[contracttype]

@@ -4,6 +4,7 @@ use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, token, Address, BytesN, Env, String, Vec,};
 
 pub mod admin;
+pub mod audit;
 pub mod batch_transfer;
 pub mod cache;
 pub mod cooldown_bypass;
@@ -1337,6 +1338,43 @@ impl QuorumCreditContract {
             .persistent()
             .get(&DataKey::ArchivedVouchHistory(borrower, voucher, token, batch_id))
             .unwrap_or(Vec::new(&env))
+    }
+
+    // ── Issue #1179: Vouch Audit Trail ────────────────────────────────────────
+
+    /// Retrieve the complete audit trail for a vouch (Issue #1179).
+    /// Returns all audit events for the specified (borrower, voucher, token) in chronological order.
+    pub fn get_vouch_audit_trail(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<crate::types::VouchAuditTrail, ContractError> {
+        audit::get_vouch_audit_trail(env, borrower, voucher, token)
+    }
+
+    /// Retrieve a page of audit events for a vouch (Issue #1179).
+    /// Returns up to `limit` events starting from index `offset`.
+    pub fn get_vouch_audit_trail_page(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<crate::types::VouchAuditEvent>, ContractError> {
+        audit::get_vouch_audit_trail_page(env, borrower, voucher, token, offset, limit)
+    }
+
+    /// Export audit trail data as a formatted report (Issue #1179).
+    /// Suitable for compliance and transparency reporting.
+    pub fn export_vouch_audit_report(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<String, ContractError> {
+        audit::export_vouch_audit_report(env, borrower, voucher, token)
     }
 
     /// Total number of borrowers ever registered (Issue #1146). Ground truth

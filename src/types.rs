@@ -773,6 +773,11 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Issue #1179: Vouch Audit Trail ────────────────────────────────────────
+    /// (borrower, voucher, token) → VouchAuditTrail (comprehensive audit trail for a vouch)
+    VouchAuditTrail(Address, Address, Address),
+    /// Monotonically increasing counter for audit event IDs across all vouches
+    VouchAuditEventIdCounter,
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2462,4 +2467,62 @@ pub struct ConfigPatch {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ScheduleType {
     Dummy,
+}
+
+// ── Issue #1179: Vouch Audit Trail ─────────────────────────────────────────
+
+/// Type of vouch operation being audited.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VouchAuditEventType {
+    Created,
+    Increased,
+    Decreased,
+    Withdrawn,
+    Delegated,
+    Revoked,
+    Slashed,
+    Settled,
+}
+
+/// Single audit event for a vouch operation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VouchAuditEvent {
+    /// Timestamp when the operation occurred.
+    pub timestamp: u64,
+    /// Type of operation: Created, Increased, Decreased, Withdrawn, etc.
+    pub operation: VouchAuditEventType,
+    /// The voucher who performed/is subject to the operation.
+    pub voucher: Address,
+    /// The borrower whose vouch is affected.
+    pub borrower: Address,
+    /// Amount involved (stake, withdrawal amount, etc.), in stroops. 0 if N/A.
+    pub amount: i128,
+    /// Optional actor address (e.g., who initiated a slash). None if self-operation.
+    pub actor: Option<Address>,
+    /// Optional reason/note for the operation.
+    pub reason: Option<soroban_sdk::String>,
+    /// Token contract address involved in this operation.
+    pub token: Address,
+    /// Unique event ID for tracking.
+    pub event_id: u64,
+}
+
+/// Audit trail for a vouch: collection of all operations affecting it.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VouchAuditTrail {
+    /// Voucher address.
+    pub voucher: Address,
+    /// Borrower address.
+    pub borrower: Address,
+    /// Token address.
+    pub token: Address,
+    /// All audit events for this vouch, in chronological order.
+    pub events: Vec<VouchAuditEvent>,
+    /// Timestamp when the audit trail was first created.
+    pub created_at: u64,
+    /// Timestamp of the last event logged.
+    pub last_event_at: u64,
 }

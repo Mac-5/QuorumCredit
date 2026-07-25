@@ -338,6 +338,18 @@ fn commit_vouch(
         },
     );
 
+    // Issue #1179: Log audit trail event for vouch creation
+    crate::audit::log_vouch_audit_event(
+        env,
+        &voucher,
+        &borrower,
+        &token,
+        crate::types::VouchAuditEventType::Created,
+        stake,
+        None,
+        None,
+    ).ok(); // Continue even if audit logging fails
+
     env.storage().persistent().set(
         &DataKey::LastVouchTimestamp(voucher.clone()),
         &timestamp,
@@ -511,8 +523,20 @@ pub fn increase_stake(
 
     env.events().publish(
         (symbol_short!("vouch"), symbol_short!("increase")),
-        (voucher, borrower, additional),
+        (voucher.clone(), borrower.clone(), additional),
     );
+
+    // Issue #1179: Log audit trail event for stake increase
+    crate::audit::log_vouch_audit_event(
+        &env,
+        &voucher,
+        &borrower,
+        &token,
+        crate::types::VouchAuditEventType::Increased,
+        additional,
+        None,
+        None,
+    ).ok();
 
     Ok(())
 }
@@ -592,8 +616,20 @@ pub fn decrease_stake(
 
     env.events().publish(
         (symbol_short!("vouch"), symbol_short!("decrease")),
-        (voucher, borrower, amount),
+        (voucher.clone(), borrower.clone(), amount),
     );
+
+    // Issue #1179: Log audit trail event for stake decrease
+    crate::audit::log_vouch_audit_event(
+        &env,
+        &voucher,
+        &borrower,
+        &token,
+        crate::types::VouchAuditEventType::Decreased,
+        amount,
+        None,
+        None,
+    ).ok();
 
     Ok(())
 }
@@ -653,8 +689,20 @@ pub fn withdraw_vouch(
 
     env.events().publish(
         (symbol_short!("vouch"), symbol_short!("withdraw")),
-        (voucher, borrower, vouch_stake),
+        (voucher.clone(), borrower.clone(), vouch_stake),
     );
+
+    // Issue #1179: Log audit trail event for vouch withdrawal
+    crate::audit::log_vouch_audit_event(
+        &env,
+        &voucher,
+        &borrower,
+        &vouch_token,
+        crate::types::VouchAuditEventType::Withdrawn,
+        vouch_stake,
+        None,
+        None,
+    ).ok();
 
     Ok(())
 }

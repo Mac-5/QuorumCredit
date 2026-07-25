@@ -28,6 +28,7 @@ pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
 pub mod covenant_monitoring;
+pub mod governance_proposal_testing;
 
 #[cfg(test)]
 mod governance_test;

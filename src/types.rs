@@ -778,6 +778,9 @@ pub enum DataKey {
     VouchAuditTrail(Address, Address, Address),
     /// Monotonically increasing counter for audit event IDs across all vouches
     VouchAuditEventIdCounter,
+    // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────
+    /// (borrower, voucher, token) → VouchMaturityRecord (tracks maturity-based interest bonuses)
+    VouchMaturity(Address, Address, Address),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2468,6 +2471,36 @@ pub struct ConfigPatch {
 pub enum ScheduleType {
     Dummy,
 }
+
+// ── Issue #1177: Vouch Maturity-Based Interest Adjustment ─────────────────
+
+/// Maturity information for a vouch tracking tenure-based interest adjustments.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VouchMaturityRecord {
+    /// Voucher address.
+    pub voucher: Address,
+    /// Borrower address.
+    pub borrower: Address,
+    /// Token address.
+    pub token: Address,
+    /// Timestamp when the vouch was created (epoch in seconds).
+    pub vouch_created_at: u64,
+    /// Last timestamp when maturity was updated/calculated.
+    pub last_maturity_update: u64,
+    /// Current maturity bonus in basis points (0-100, where 100 = 1%).
+    /// Updated as the vouch ages: +0.1% per 6 months.
+    pub maturity_bonus_bps: i128,
+    /// Whether this vouch qualifies for loyalty bonus (2+ years of continuous vouching).
+    pub loyalty_bonus_eligible: bool,
+}
+
+/// Maturity-based interest adjustment constants.
+pub const MATURITY_BONUS_INCREMENT_BPS: i128 = 10; // 0.1% per 6 months
+pub const MATURITY_BONUS_PERIOD_SECS: u64 = 6 * 30 * 24 * 60 * 60; // ~6 months
+pub const MATURITY_BONUS_MAX_BPS: i128 = 100; // Cap at 1%
+pub const LOYALTY_BONUS_THRESHOLD_SECS: u64 = 2 * 365 * 24 * 60 * 60; // 2 years
+pub const LOYALTY_BONUS_BPS: i128 = 50; // 0.5% additional bonus for 2+ years
 
 // ── Issue #1179: Vouch Audit Trail ─────────────────────────────────────────
 

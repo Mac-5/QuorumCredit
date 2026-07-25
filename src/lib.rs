@@ -17,6 +17,7 @@ pub mod insurance;
 pub mod invariants;
 pub mod lazy_slash;
 pub mod loan;
+pub mod maturity;
 pub mod merkle_tree;
 pub mod rbac;
 pub mod reputation;
@@ -1375,6 +1376,41 @@ impl QuorumCreditContract {
         token: Address,
     ) -> Result<String, ContractError> {
         audit::export_vouch_audit_report(env, borrower, voucher, token)
+    }
+
+    // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────
+
+    /// Get the maturity record for a vouch (Issue #1177).
+    /// Returns tenure information and current maturity bonus.
+    pub fn get_vouch_maturity(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        token: Address,
+    ) -> Result<crate::types::VouchMaturityRecord, ContractError> {
+        maturity::get_vouch_maturity(env, voucher, borrower, token)
+    }
+
+    /// Get the current maturity bonus for a vouch in basis points (Issue #1177).
+    /// Returns 0-100 bps representing 0-1% additional interest from tenure.
+    pub fn get_vouch_maturity_bonus(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        token: Address,
+    ) -> Result<i128, ContractError> {
+        maturity::update_maturity_bonus(&env, &voucher, &borrower, &token)
+    }
+
+    /// Get the total interest bonus for a vouch including loyalty bonus (Issue #1177).
+    /// Returns maturity bonus + loyalty bonus (if eligible for 2+ years).
+    pub fn get_vouch_total_interest_bonus(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        token: Address,
+    ) -> Result<i128, ContractError> {
+        maturity::get_total_interest_bonus(&env, &voucher, &borrower, &token)
     }
 
     /// Total number of borrowers ever registered (Issue #1146). Ground truth

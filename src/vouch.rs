@@ -350,6 +350,14 @@ fn commit_vouch(
         None,
     ).ok(); // Continue even if audit logging fails
 
+    // Issue #1177: Initialize maturity tracking for tenure-based interest bonuses
+    crate::maturity::initialize_vouch_maturity(
+        env,
+        &voucher,
+        &borrower,
+        &token,
+    ).ok(); // Continue even if maturity tracking fails
+
     env.storage().persistent().set(
         &DataKey::LastVouchTimestamp(voucher.clone()),
         &timestamp,

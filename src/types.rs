@@ -787,6 +787,13 @@ pub enum DataKey {
     VouchReputationWeight(u64),
     /// (borrower, token) → WeightedVouchDistribution (quorum tracking)
     WeightedVouchDistribution(Address, Address),
+    // ── Issue #1175: Vouch Slashing Protection Bonds ───────────────────────────
+    /// (voucher, loan_id) → VouchProtectionBond (bond for vouch protection)
+    VouchProtectionBond(Address, u64),
+    /// (voucher, loan_id) → BondInsuranceRecord (optional bond insurance)
+    BondInsurance(Address, u64),
+    /// voucher → BondStats (tracking bond utilization and performance)
+    BondStats(Address),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -1738,6 +1745,106 @@ pub struct GuarantorStats {
     /// Reputation score (0-1000): higher = better guarantor
     pub reputation_score: u32,
     /// Last active timestamp
+    pub last_activity: u64,
+}
+
+/// Issue #1175: Vouch slashing protection bond.
+/// Bonds limit the maximum loss a voucher can suffer if a borrower defaults.
+#[contracttype]
+#[derive(Clone)]
+pub struct VouchProtectionBond {
+    /// Voucher address
+    pub voucher: Address,
+    /// Loan ID this bond is protecting
+    pub loan_id: u64,
+    /// Vouch ID (typically matches loan_id in current design)
+    pub vouch_id: u64,
+    /// Bond amount staked (in stroops) - covers up to 50% of vouch amount
+    pub bond_amount: i128,
+    /// The vouch stake this bond is protecting
+    pub protected_stake: i128,
+    /// Timestamp when bond was created
+    pub created_at: u64,
+    /// Amount of bond used to cover slash (in stroops)
+    pub amount_used: i128,
+    /// Timestamp when bond was released (None if still active)
+    pub released_at: Option<u64>,
+    /// Status of the bond
+    pub status: BondStatus,
+    /// Whether optional bond insurance was purchased
+    pub has_insurance: bool,
+}
+
+/// Status of a vouch protection bond.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BondStatus {
+    /// Bond is active and protecting the vouch
+    Active,
+    /// Bond has been partially used to cover a slash
+    PartiallyUsed,
+    /// Bond has been fully used to cover a slash
+    Exhausted,
+    /// Bond has been released after loan completion
+    Released,
+}
+
+/// Issue #1175: Optional bond insurance.
+/// Provides additional coverage for the bond with a 3% premium surcharge.
+#[contracttype]
+#[derive(Clone)]
+pub struct BondInsuranceRecord {
+    /// Voucher address
+    pub voucher: Address,
+    /// Loan ID
+    pub loan_id: u64,
+    /// Bond amount covered by insurance
+    pub insured_bond_amount: i128,
+    /// Insurance premium paid (3% of bond amount)
+    pub premium_paid: i128,
+    /// Maximum payout (typically 100% of bond amount)
+    pub max_coverage: i128,
+    /// Amount claimed under insurance (if any)
+    pub amount_claimed: i128,
+    /// Status of the insurance
+    pub status: InsuranceStatus,
+    /// Timestamp when insurance was purchased
+    pub purchased_at: u64,
+}
+
+/// Status of bond insurance.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InsuranceStatus {
+    /// Insurance is active
+    Active,
+    /// Insurance claim has been paid
+    Claimed,
+    /// Insurance has been cancelled/released
+    Released,
+}
+
+/// Issue #1175: Bond tracking and statistics.
+#[contracttype]
+#[derive(Clone)]
+pub struct BondStats {
+    /// Voucher address
+    pub voucher: Address,
+    /// Total bond amount across all loans (in stroops)
+    pub total_bonded: i128,
+    /// Total bond amount used to cover slashes (in stroops)
+    pub total_used: i128,
+    /// Number of active bonds
+    pub active_bonds: u32,
+    /// Number of times this voucher's bond was used
+    pub times_bond_used: u32,
+    /// Total bond insurance premiums paid (in stroops)
+    pub total_insurance_premiums: i128,
+    /// Number of insurance claims paid
+    pub insurance_claims_paid: u32,
+    /// Total insurance payout (in stroops)
+    pub total_insurance_payout: i128,
+    /// Last activity timestamp
     pub last_activity: u64,
 }
 

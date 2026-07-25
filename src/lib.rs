@@ -5,6 +5,7 @@ use soroban_sdk::{
 
 pub mod admin;
 pub mod batch_transfer;
+pub mod bond_protection;
 pub mod cache;
 pub mod cooldown_bypass;
 pub mod credit_score;

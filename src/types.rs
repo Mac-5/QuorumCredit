@@ -773,6 +773,30 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+
+    // ── Issue #1171: Vouch syndication ───────────────────────────────────────
+    /// pool_id → SyndicatePool
+    SyndicatePool(u64),
+    /// (pool_id, member) → SyndicateMember
+    SyndicateMember(u64, Address),
+    /// pool_id → SyndicatePerformance
+    SyndicatePerformance(u64),
+    /// pool_id → next proposal id counter for that syndicate's governance
+    SyndicateProposalCounter(u64),
+    /// (pool_id, proposal_id) → SyndicateProposal
+    SyndicateProposal(u64, u64),
+    /// (pool_id, proposal_id, member) → bool already voted
+    SyndicateProposalVote(u64, u64, Address),
+
+    // ── Issue #1169: Milestone-based vouch release ───────────────────────────
+    /// (loan_id, milestone as u32) → u64 timestamp the milestone was achieved
+    MilestoneAchieved(u64, u32),
+    /// (loan_id, voucher, milestone as u32) → i128 amount released for that voucher
+    VouchMilestoneRelease(u64, Address, u32),
+
+    // ── Issue #1168: Recurring repayment automation ──────────────────────────
+    /// borrower → RecurringPaymentConfig
+    RecurringPayment(Address),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2462,4 +2486,137 @@ pub struct ConfigPatch {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ScheduleType {
     Dummy,
+}
+
+// ── Issue #1171: Vouch syndication ────────────────────────────────────────────
+
+/// A single voucher's contribution when creating or joining a syndicate pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicateContribution {
+    pub member: Address,
+    /// Stake this member is contributing to the pool, in stroops.
+    pub amount: i128,
+}
+
+/// A pool of vouchers who share vouching risk and reward proportionally to
+/// their contributed stake, instead of each voucher bearing risk alone.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicatePool {
+    pub pool_id: u64,
+    pub creator: Address,
+    pub token: Address,
+    pub members: Vec<Address>,
+    /// Sum of all members' `amount` contributions, in stroops.
+    pub total_stake: i128,
+    /// Reward accrued to the pool that has not yet been distributed, in stroops.
+    pub pending_rewards: i128,
+    pub created_at: u64,
+    pub active: bool,
+}
+
+/// Per-member record within a syndicate pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicateMember {
+    pub member: Address,
+    /// Stake contributed by this member, in stroops.
+    pub contribution: i128,
+    /// This member's share of the pool in basis points (10_000 = 100%).
+    pub share_bps: u32,
+    /// Cumulative rewards this member has been paid out, in stroops.
+    pub rewards_received: i128,
+}
+
+/// Running performance metrics for a syndicate pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicatePerformance {
+    pub pool_id: u64,
+    /// Total rewards distributed to members across the pool's lifetime, in stroops.
+    pub total_rewards_distributed: i128,
+    /// Total stake lost to slashing across the pool's lifetime, in stroops.
+    pub total_slashed: i128,
+    /// Number of times rewards have been distributed.
+    pub distribution_count: u32,
+}
+
+/// Governance proposal status for syndicate member voting.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum SyndicateProposalStatus {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+/// A member-raised governance proposal within a syndicate pool (e.g. dissolve
+/// the pool, change a policy). Voting weight is each member's `share_bps`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicateProposal {
+    pub pool_id: u64,
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub description: String,
+    /// Sum of share_bps of members who voted for.
+    pub votes_for_bps: u32,
+    /// Sum of share_bps of members who voted against.
+    pub votes_against_bps: u32,
+    pub status: SyndicateProposalStatus,
+    pub created_at: u64,
+}
+
+// ── Issue #1169: Milestone-based vouch release ────────────────────────────────
+
+/// Loan lifecycle milestones that a vouch can be partially released against.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum LoanMilestone {
+    Issued,
+    FirstPaymentMade,
+    HalfRepaid,
+    Completed,
+}
+
+impl LoanMilestone {
+    /// Fraction of a voucher's stake released when this milestone is reached,
+    /// expressed in basis points. Each milestone releases 25% (2_500 bps).
+    pub fn release_bps(&self) -> u32 {
+        2_500
+    }
+
+    /// Stable numeric discriminant used as a storage-key component.
+    pub fn index(&self) -> u32 {
+        match self {
+            LoanMilestone::Issued => 0,
+            LoanMilestone::FirstPaymentMade => 1,
+            LoanMilestone::HalfRepaid => 2,
+            LoanMilestone::Completed => 3,
+        }
+    }
+}
+
+// ── Issue #1168: Recurring repayment automation ───────────────────────────────
+
+/// Borrower-configured recurring repayment schedule, executed by anyone
+/// (e.g. an off-chain keeper) once `next_payment_due` has passed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringPaymentConfig {
+    pub borrower: Address,
+    pub token: Address,
+    /// Amount transferred per period, in stroops.
+    pub amount: i128,
+    /// Seconds between successive payments.
+    pub frequency_secs: u64,
+    /// Ledger timestamp the schedule starts at.
+    pub start_date: u64,
+    /// Ledger timestamp the next payment becomes executable.
+    pub next_payment_due: u64,
+    pub active: bool,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub retry_count: u32,
 }

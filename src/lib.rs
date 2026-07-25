@@ -11,6 +11,7 @@ pub mod credit_score;
 pub mod cross_chain;
 pub mod errors;
 pub mod governance;
+pub mod guarantor;
 pub mod helpers;
 pub mod insurance;
 pub mod invariants;

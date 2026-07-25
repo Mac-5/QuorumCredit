@@ -244,4 +244,16 @@ EmergencyBypassNotAuthorised = 131,
     InvariantViolation = 178,
     /// The withdrawal queue has reached its maximum size.
     WithdrawalQueueFull = 179,
+    /// Issue #1172: Guarantor not found.
+    GuarantorNotFound = 180,
+    /// Issue #1172: Guarantor is already assigned to this loan.
+    GuarantorAlreadyAssigned = 181,
+    /// Issue #1172: Invalid guarantor address (e.g., same as borrower).
+    InvalidGuarantor = 182,
+    /// Issue #1172: Invalid guarantee amount.
+    InvalidGuaranteeAmount = 183,
+    /// Issue #1172: Guarantor coverage has already been claimed.
+    GuarantorAlreadyClaimed = 184,
+    /// Issue #1172: Invalid guarantee status for operation.
+    InvalidGuaranteeStatus = 185,
 }

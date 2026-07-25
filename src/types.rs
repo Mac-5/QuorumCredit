@@ -773,6 +773,15 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Issue #1172: Guarantor Support ──────────────────────────────────────────
+    /// loan_id → GuarantorRecord (guarantor information for a loan)
+    GuarantorRecord(u64),
+    /// (guarantor, loan_id) → GuarantorObligation (tracks guarantor's obligation)
+    GuarantorObligation(Address, u64),
+    /// guarantor → GuarantorStats (reputation and statistics)
+    GuarantorStats(Address),
+    /// monotonically increasing guarantor ID counter
+    GuarantorIdCounter,
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -1649,6 +1658,82 @@ pub struct ArchivedLoanRecord {
     pub loan_purpose: soroban_sdk::String,
     /// Token used for this loan.
     pub token_address: Address,
+}
+
+/// Issue #1172: Guarantor record for a loan.
+/// Tracks the guarantor backing a loan and their obligations.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorRecord {
+    /// Loan ID this guarantor is backing
+    pub loan_id: u64,
+    /// Guarantor address
+    pub guarantor: Address,
+    /// Guarantor signature commitment (to verify backing)
+    pub signature_verified: bool,
+    /// Amount guaranteed (in stroops) — can be less than full loan amount
+    pub guarantee_amount: i128,
+    /// Timestamp when guarantor was requested for this loan
+    pub requested_at: u64,
+    /// Timestamp when guarantor was released (None if still active)
+    pub released_at: Option<u64>,
+    /// Status of the guarantee
+    pub status: GuaranteeStatus,
+}
+
+/// Status of a guarantee.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GuaranteeStatus {
+    /// Guarantee is active and binding
+    Active,
+    /// Guarantee has been released after loan completion
+    Released,
+    /// Guarantee has been triggered (borrower defaulted)
+    Triggered,
+    /// Guarantee has been claimed (funds distributed)
+    Claimed,
+}
+
+/// Issue #1172: Guarantor obligation tracking.
+/// Tracks what the guarantor owes if the borrower defaults.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorObligation {
+    /// Guarantor address
+    pub guarantor: Address,
+    /// Loan ID
+    pub loan_id: u64,
+    /// Borrower address
+    pub borrower: Address,
+    /// Maximum amount guarantor is liable for (in stroops)
+    pub max_liability: i128,
+    /// Amount already paid by guarantor (in stroops)
+    pub amount_paid: i128,
+    /// Timestamp when obligation was created
+    pub created_at: u64,
+    /// Timestamp when obligation was fulfilled or waived
+    pub closed_at: Option<u64>,
+}
+
+/// Issue #1172: Guarantor reputation and statistics.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorStats {
+    /// Total number of guarantees provided
+    pub total_guarantees: u32,
+    /// Number of successfully fulfilled guarantees
+    pub successful_guarantees: u32,
+    /// Number of triggered guarantees (defaults)
+    pub triggered_guarantees: u32,
+    /// Total amount guaranteed across all loans (in stroops)
+    pub total_guaranteed: i128,
+    /// Total amount paid out on triggered guarantees (in stroops)
+    pub total_paid_out: i128,
+    /// Reputation score (0-1000): higher = better guarantor
+    pub reputation_score: u32,
+    /// Last active timestamp
+    pub last_activity: u64,
 }
 
 /// A reference to archived data stored on IPFS.

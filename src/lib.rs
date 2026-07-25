@@ -9,6 +9,8 @@ pub mod cache;
 pub mod cooldown_bypass;
 pub mod credit_score;
 pub mod cross_chain;
+pub mod detection;
+pub mod diversification;
 pub mod errors;
 pub mod governance;
 pub mod helpers;
@@ -23,7 +25,6 @@ pub mod types;
 pub mod vouch;
 pub mod zk_snarks;
 pub mod collateral_pool;
-pub mod detection;
 pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
@@ -1337,6 +1338,32 @@ impl QuorumCreditContract {
             .persistent()
             .get(&DataKey::ArchivedVouchHistory(borrower, voucher, token, batch_id))
             .unwrap_or(Vec::new(&env))
+    }
+
+    // ── Diversification Scoring (Issue #1181) ────────────────────────────────────
+
+    /// Calculate diversification score for a voucher's portfolio (Issue #1181).
+    /// Returns a detailed breakdown including borrower count, sector variety,
+    /// geographic spread, and whether the voucher qualifies for the diversification badge.
+    pub fn get_diversification_score(
+        env: Env,
+        voucher: Address,
+    ) -> Result<diversification::DiversificationScore, ContractError> {
+        diversification::calculate_diversification_score(&env, &voucher)
+    }
+
+    /// Check if a voucher qualifies for the diversification badge (score >= 80).
+    pub fn has_diversification_badge(env: Env, voucher: Address) -> Result<bool, ContractError> {
+        diversification::has_diversification_badge(&env, &voucher)
+    }
+
+    /// Get portfolio improvement recommendations for a voucher.
+    pub fn get_diversification_recommendations(
+        env: Env,
+        voucher: Address,
+    ) -> Result<Vec<diversification::PortfolioRecommendation>, ContractError> {
+        let score = diversification::calculate_diversification_score(&env, &voucher)?;
+        Ok(diversification::generate_recommendations(&env, &score))
     }
 
     /// Total number of borrowers ever registered (Issue #1146). Ground truth

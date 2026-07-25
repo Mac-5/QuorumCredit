@@ -144,6 +144,9 @@ impl QuorumCreditContract {
             (deployer, admins, admin_threshold, token),
         );
 
+        // Initialize flash loan subsystem (Issue #1183)
+        flash_loan::initialize_flash_loans(&env)?;
+
         Ok(())
     }
 

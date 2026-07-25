@@ -10,6 +10,7 @@ pub mod cache;
 pub mod cooldown_bypass;
 pub mod credit_score;
 pub mod cross_chain;
+pub mod differential_testing;
 pub mod errors;
 pub mod governance;
 pub mod helpers;

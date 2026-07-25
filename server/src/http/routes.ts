@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { issueToken } from "../auth/tokens.js";
 import { metrics } from "./metricsRegistry.js";
+import * as insuranceMarketplace from "../insurance-marketplace.js";
 
 export interface RouteContext {
   authSecret: string;
@@ -55,6 +56,109 @@ export function handleHttpRequest(
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "invalid request body" }));
       });
+    return;
+  }
+
+  // Issue #1174: Insurance marketplace endpoints
+  if (req.method === "GET" && url.pathname === "/insurance/providers") {
+    const providers = insuranceMarketplace.getActiveProviders();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ providers }));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/insurance/products") {
+    const products = insuranceMarketplace.getActiveProducts();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ products }));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/insurance/quotes") {
+    const params = url.searchParams;
+    const loanId = parseInt(params.get("loanId") || "0", 10);
+    const borrower = params.get("borrower") || "";
+    const loanAmount = parseInt(params.get("loanAmount") || "0", 10);
+    const token = params.get("token") || "USDC";
+
+    if (!loanId || !borrower || !loanAmount) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required parameters: loanId, borrower, loanAmount" }));
+      return;
+    }
+
+    insuranceMarketplace
+      .generateInsuranceQuotes(loanId, borrower, loanAmount, token)
+      .then((quotes) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ quotes }));
+      })
+      .catch((error) => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Failed to generate quotes", details: error.message }));
+      });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/insurance/quote") {
+    const quoteId = url.searchParams.get("quoteId") || "";
+    const quote = insuranceMarketplace.getQuote(quoteId);
+
+    if (!quote) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Quote not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ quote }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/insurance/claim") {
+    readJsonBody(req)
+      .then((body: Record<string, unknown>) => {
+        const loanId = body.loanId as number;
+        const borrower = body.borrower as string;
+        const productId = body.productId as string;
+        const claimAmount = body.claimAmount as number;
+
+        if (!loanId || !borrower || !productId || !claimAmount) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing required fields" }));
+          return;
+        }
+
+        const claim = insuranceMarketplace.submitClaim(loanId, borrower, productId, claimAmount);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ claim }));
+      })
+      .catch(() => {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid request body" }));
+      });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/insurance/claim") {
+    const claimId = url.searchParams.get("claimId") || "";
+    const claim = insuranceMarketplace.getClaim(claimId);
+
+    if (!claim) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Claim not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ claim }));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/insurance/stats") {
+    const stats = insuranceMarketplace.getMarketplaceStats();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ stats }));
     return;
   }
 

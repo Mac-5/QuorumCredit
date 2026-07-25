@@ -36,6 +36,8 @@ mod interest_test;
 #[cfg(test)]
 mod invariants_test;
 #[cfg(test)]
+mod property_based_invariants_test;
+#[cfg(test)]
 mod loan_purpose_test;
 #[cfg(test)]
 mod multi_asset_test;

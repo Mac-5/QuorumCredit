@@ -46,6 +46,8 @@ mod tests;
 mod rbac_enforcement_test;
 #[cfg(test)]
 mod storage_redesign_test;
+#[cfg(test)]
+mod api_contract_test;
 
 pub use errors::ContractError;
 pub use types::*;

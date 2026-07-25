@@ -22,6 +22,7 @@ pub mod rbac;
 pub mod reputation;
 pub mod types;
 pub mod vouch;
+pub mod vouch_reputation;
 pub mod zk_snarks;
 pub mod collateral_pool;
 pub mod detection;

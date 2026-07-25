@@ -782,6 +782,11 @@ pub enum DataKey {
     GuarantorStats(Address),
     /// monotonically increasing guarantor ID counter
     GuarantorIdCounter,
+    // ── Issue #1173: Vouch Reputation Score Impact ──────────────────────────────
+    /// vouch_id → VouchReputationWeight (weighted strength calculation)
+    VouchReputationWeight(u64),
+    /// (borrower, token) → WeightedVouchDistribution (quorum tracking)
+    WeightedVouchDistribution(Address, Address),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -1793,6 +1798,47 @@ pub struct VouchRecord {
     /// Optional chain ID for cross-chain vouches. `None` means native Stellar.
     /// When set, the token must originate from a registered bridge for that chain.
     pub chain_id: Option<u32>,
+}
+
+/// Issue #1173: Vouch reputation weighted strength.
+/// Tracks the reputation-adjusted strength of a vouch in quorum calculations.
+#[contracttype]
+#[derive(Clone)]
+pub struct VouchReputationWeight {
+    /// Vouch ID (same as loan_id for now)
+    pub vouch_id: u64,
+    /// Base strength of the vouch (the raw stake)
+    pub base_strength: i128,
+    /// Voucher's reputation score (0-1000)
+    pub voucher_reputation: u32,
+    /// Calculated weighted strength: base_strength × (1 + (reputation / 1000))
+    /// Capped at 1.5x multiplier for reputation >= 1500
+    pub weighted_strength: i128,
+    /// Weight multiplier applied (in basis points, e.g., 1000 = 1.0x, 1500 = 1.5x)
+    pub weight_multiplier_bps: u32,
+    /// Timestamp when weight was last calculated
+    pub calculated_at: u64,
+}
+
+/// Issue #1173: Weighted vouch distribution for a borrower.
+/// Tracks aggregate reputation-weighted vouch strength for quorum calculations.
+#[contracttype]
+#[derive(Clone)]
+pub struct WeightedVouchDistribution {
+    /// Borrower address
+    pub borrower: Address,
+    /// Token address
+    pub token: Address,
+    /// Total base stake (unweighted)
+    pub total_base_stake: i128,
+    /// Total weighted stake (reputation-adjusted)
+    pub total_weighted_stake: i128,
+    /// Number of vouches contributing
+    pub vouch_count: u32,
+    /// Average weight multiplier across all vouches (in basis points)
+    pub average_weight_multiplier_bps: u32,
+    /// Timestamp when distribution was last updated
+    pub updated_at: u64,
 }
 
 /// Metadata for a registered cross-chain bridge.

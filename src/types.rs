@@ -773,6 +773,24 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Contingent Loans (Issue #1189) ───────────────────────────────────────
+    /// loan_id → ContingentLoanRecord (conditional loan tied to oracle prediction)
+    ContingentLoan(u64),
+    /// monotonically increasing contingent loan ID counter
+    ContingentLoanCounter,
+    /// (loan_id, oracle_id) → OracleConditionRecord (oracle verification status)
+    OracleCondition(u64, u32),
+    /// loan_id → Vec<OracleDataPoint> (pending oracle verification data)
+    PendingOracleVerification(u64),
+    // ── Loan Tranching (Issue #1191) ──────────────────────────────────────────
+    /// loan_id → LoanTranchStructure (tiered investment structure)
+    LoanTranche(u64),
+    /// (loan_id, tranche_tier) → TrancheRecord (individual tranche details)
+    TrancheRecord(u64, u32),
+    /// (loan_id, tranche_tier, investor) → TrancheInvestment (investor allocation)
+    TrancheInvestment(u64, u32, Address),
+    /// monotonically increasing loan tranche structure ID counter
+    TrancheCounter,
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2462,4 +2480,196 @@ pub struct ConfigPatch {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ScheduleType {
     Dummy,
+}
+
+// ── Contingent Loan Types (Issue #1189) ────────────────────────────────────
+
+/// Condition type for contingent loan activation
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LoanCondition {
+    /// Price-based condition (e.g., stablecoin price > threshold)
+    PriceThreshold {
+        /// Oracle ID for price feed
+        oracle_id: u32,
+        /// Threshold price in stroops
+        threshold: i128,
+        /// True if price must exceed threshold, false if must be below
+        above_threshold: bool,
+    },
+    /// Time-based condition (loan activates after timestamp)
+    TimeThreshold {
+        /// Activation timestamp (ledger time)
+        activation_time: u64,
+    },
+}
+
+/// A loan that activates only when external conditions are met
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContingentLoanRecord {
+    /// Loan ID from main LoanRecord
+    pub loan_id: u64,
+    /// Borrower address
+    pub borrower: Address,
+    /// Condition for activation
+    pub condition: LoanCondition,
+    /// Whether the condition has been verified
+    pub condition_verified: bool,
+    /// Timestamp when condition was verified (if any)
+    pub verified_at: Option<u64>,
+    /// Initial loan amount (before activation)
+    pub amount: i128,
+    /// Status: Pending, Active, Activated, Expired
+    pub status: ContingentLoanStatus,
+}
+
+/// Status of a contingent loan
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContingentLoanStatus {
+    /// Awaiting condition verification
+    Pending,
+    /// Condition verified, loan is now active
+    Activated,
+    /// Loan expired before condition was met
+    Expired,
+    /// Loan was cancelled
+    Cancelled,
+}
+
+/// Oracle data point for condition verification
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleDataPoint {
+    /// Timestamp of the data point
+    pub timestamp: u64,
+    /// Price or value from oracle
+    pub value: i128,
+    /// Whether this point satisfies the condition
+    pub satisfies_condition: bool,
+}
+
+/// Oracle condition verification record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleConditionRecord {
+    /// Loan ID
+    pub loan_id: u64,
+    /// Oracle ID
+    pub oracle_id: u32,
+    /// Verification status
+    pub verified: bool,
+    /// Last verification timestamp
+    pub last_checked: u64,
+}
+
+// ── Loan Tranching Types (Issue #1191) ──────────────────────────────────────
+
+/// Tranche tier representing different risk/return profiles
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrancheTier {
+    /// Senior tranche (lowest risk, fixed 5% return)
+    Senior,
+    /// Junior tranche (medium risk, ~15% return)
+    Junior,
+    /// Equity tranche (highest risk, variable return)
+    Equity,
+}
+
+/// Tranched loan structure with differentiated investor tiers
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoanTranchStructure {
+    /// Loan ID
+    pub loan_id: u64,
+    /// Borrower address
+    pub borrower: Address,
+    /// Total loan amount (sum of all tranches)
+    pub total_amount: i128,
+    /// Senior tranche amount (fixed allocation)
+    pub senior_amount: i128,
+    /// Junior tranche amount (fixed allocation)
+    pub junior_amount: i128,
+    /// Equity tranche amount (fixed allocation)
+    pub equity_amount: i128,
+    /// Senior tranche fixed return in basis points (500 = 5%)
+    pub senior_return_bps: u32,
+    /// Junior tranche return in basis points (1500 = 15%)
+    pub junior_return_bps: u32,
+    /// Equity tranche variable return (starts at 0)
+    pub equity_return_bps: u32,
+    /// Timestamp when structure was created
+    pub created_at: u64,
+    /// Status: Active, Completed, Defaulted
+    pub status: TrancheStatus,
+}
+
+/// Individual tranche record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrancheRecord {
+    /// Loan ID
+    pub loan_id: u64,
+    /// Tranche tier (Senior, Junior, Equity)
+    pub tier: TrancheTier,
+    /// Total allocated to this tranche
+    pub amount: i128,
+    /// Amount already repaid
+    pub repaid: i128,
+    /// Return rate in basis points
+    pub return_bps: u32,
+    /// Total losses absorbed by this tranche
+    pub losses: i128,
+    /// Status: Pending, Active, Repaid, Defaulted
+    pub status: TrancheStatus,
+}
+
+/// Investor allocation in a specific tranche
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrancheInvestment {
+    /// Loan ID
+    pub loan_id: u64,
+    /// Tranche tier
+    pub tier: TrancheTier,
+    /// Investor address
+    pub investor: Address,
+    /// Amount invested by this investor
+    pub amount: i128,
+    /// Amount already repaid to investor
+    pub repaid: i128,
+    /// Investor's share of losses
+    pub loss_absorption: i128,
+    /// Timestamp when investment was made
+    pub invested_at: u64,
+}
+
+/// Status of a tranche
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrancheStatus {
+    /// Tranche is pending activation
+    Pending,
+    /// Tranche is actively receiving repayments
+    Active,
+    /// Tranche fully repaid
+    Repaid,
+    /// Tranche encountered default
+    Defaulted,
+}
+
+/// Waterfall distribution result
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WaterfallDistribution {
+    /// Amount distributed to senior tranche
+    pub senior_distribution: i128,
+    /// Amount distributed to junior tranche
+    pub junior_distribution: i128,
+    /// Amount distributed to equity tranche
+    pub equity_distribution: i128,
+    /// Timestamp of distribution
+    pub distributed_at: u64,
 }

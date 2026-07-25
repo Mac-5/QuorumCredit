@@ -773,6 +773,17 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
+    // ── Issue #1193: Loan Covenant Monitoring ─────────────────────────────────
+    /// loan_id → LoanCovenantConfig (covenant requirements for the loan)
+    LoanCovenantConfig(u64),
+    /// loan_id → LoanCovenantStatus (current covenant compliance status)
+    LoanCovenantStatus(u64),
+    /// (loan_id, breach_index) → CovenantBreach (breach history record)
+    CovenantBreach(u64, u32),
+    /// loan_id → u32 (number of breach records)
+    CovenantBreachCount(u64),
+    /// (loan_id, timestamp) → CovenantMonitoringEvent (monitoring events)
+    CovenantMonitoringEvent(u64, u64),
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -2442,6 +2453,136 @@ pub struct AttributeEntry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VoucherFraudScore {
     pub score: u32,
+}
+
+/// Issue #1193: Loan covenant monitoring types
+/// Covenants are financial and operational requirements that borrowers must maintain
+/// throughout the loan lifecycle. Violations trigger escalation protocols.
+
+/// Covenant type enumeration for different monitoring requirements
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CovenantType {
+    /// Loan-to-value ratio covenant: Loan amount ≤ LTV% of collateral
+    LoanToValue,
+    /// Debt-to-income ratio: Total debt ≤ DTI% of borrower income
+    DebtToIncome,
+    /// Minimum payment schedule: Payments on time each period
+    PaymentSchedule,
+    /// Activity requirement: Minimum transaction volume per period
+    ActivityRequirement,
+    /// Collateral maintenance: Collateral value must not fall below threshold
+    CollateralMaintenance,
+    /// Cross-default: Triggered by defaults on other platforms
+    CrossDefault,
+}
+
+/// Covenant breach severity levels for escalation
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum BreachSeverity {
+    /// Minor breach: Warning stage
+    Warning,
+    /// Moderate breach: Review required
+    Moderate,
+    /// Critical breach: Immediate action required
+    Critical,
+}
+
+/// Escalation stage in the covenant monitoring process
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum EscalationStage {
+    /// Initial warning notification
+    Warning,
+    /// Active review process
+    UnderReview,
+    /// Preparation for acceleration
+    PendingAcceleration,
+    /// Loan acceleration triggered
+    Accelerated,
+}
+
+/// Configuration for a loan's covenants
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoanCovenantConfig {
+    /// Loan ID this config applies to
+    pub loan_id: u64,
+    /// Types of covenants active for this loan
+    pub covenant_types: Vec<CovenantType>,
+    /// LTV ratio in basis points (e.g., 8000 = 80%)
+    pub ltv_ratio_bps: u32,
+    /// DTI ratio in basis points (e.g., 4500 = 45%)
+    pub dti_ratio_bps: u32,
+    /// Minimum activity required (transactions per period)
+    pub min_activity_per_period: u32,
+    /// Collateral maintenance threshold in basis points
+    pub collateral_maintenance_bps: u32,
+    /// Monitoring period in seconds
+    pub monitoring_period_secs: u64,
+    /// Number of breaches allowed before escalation
+    pub breach_tolerance: u32,
+}
+
+/// Current compliance status of a loan's covenants
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoanCovenantStatus {
+    /// Loan ID being monitored
+    pub loan_id: u64,
+    /// Current escalation stage
+    pub escalation_stage: EscalationStage,
+    /// Number of recorded breaches
+    pub breach_count: u32,
+    /// Timestamp of most recent breach
+    pub last_breach_timestamp: u64,
+    /// Timestamp of last monitoring check
+    pub last_check_timestamp: u64,
+    /// Whether covenant acceleration has been triggered
+    pub is_accelerated: bool,
+    /// Timestamp of acceleration (if triggered)
+    pub acceleration_timestamp: u64,
+}
+
+/// Individual covenant breach record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CovenantBreach {
+    /// Loan ID with breach
+    pub loan_id: u64,
+    /// Type of covenant violated
+    pub covenant_type: CovenantType,
+    /// Severity of the breach
+    pub severity: BreachSeverity,
+    /// Breach detection timestamp
+    pub detected_timestamp: u64,
+    /// Description of the breach (e.g., "LTV 92% exceeds 80% limit")
+    pub description: soroban_sdk::String,
+    /// Value that triggered the breach
+    pub violation_value: i128,
+    /// Allowed threshold value
+    pub threshold_value: i128,
+    /// Whether this breach triggered escalation
+    pub triggered_escalation: bool,
+}
+
+/// Covenant monitoring event record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CovenantMonitoringEvent {
+    /// Loan ID being monitored
+    pub loan_id: u64,
+    /// Event timestamp
+    pub event_timestamp: u64,
+    /// Event type description
+    pub event_type: soroban_sdk::String,
+    /// Previous escalation stage
+    pub previous_stage: EscalationStage,
+    /// New escalation stage
+    pub new_stage: EscalationStage,
+    /// Additional context about the event
+    pub details: soroban_sdk::String,
 }
 
 #[contracttype]

@@ -27,6 +27,7 @@ pub mod detection;
 pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
+pub mod covenant_monitoring;
 
 #[cfg(test)]
 mod governance_test;

@@ -30,6 +30,7 @@ pub mod syndication;
 pub mod economic_simulation;
 pub mod loan_tokenization;
 pub mod gas_cost_regression;
+pub mod pool_composability;
 
 #[cfg(test)]
 mod governance_test;
@@ -3156,5 +3157,96 @@ impl QuorumCreditContract {
         operation: String,
     ) -> Result<bool, ContractError> {
         gas_cost_regression::verify_gas_optimization(&env, &operation)
+    }
+
+    // ── Lending Pool Composability (Issue #1187) ──────────────────────────────────
+
+    pub fn register_external_pool(
+        env: Env,
+        protocol_name: String,
+        pool_contract: Address,
+        strategy_type: String,
+    ) -> Result<pool_composability::ExternalPoolInterface, ContractError> {
+        pool_composability::register_external_pool(&env, protocol_name, pool_contract, strategy_type)
+    }
+
+    pub fn deposit_to_external_pool(
+        env: Env,
+        internal_pool_id: u64,
+        external_pool_id: u64,
+        amount: i128,
+    ) -> Result<pool_composability::ExternalPoolDeposit, ContractError> {
+        pool_composability::deposit_to_external_pool(&env, internal_pool_id, external_pool_id, amount)
+    }
+
+    pub fn record_yield_earning(
+        env: Env,
+        deposit_id: u64,
+        amount: i128,
+        apy_bps: u32,
+    ) -> Result<pool_composability::YieldEarning, ContractError> {
+        pool_composability::record_yield_earning(&env, deposit_id, amount, apy_bps)
+    }
+
+    pub fn claim_all_yields(
+        env: Env,
+        internal_pool_id: u64,
+    ) -> Result<i128, ContractError> {
+        pool_composability::claim_all_yields(&env, internal_pool_id)
+    }
+
+    pub fn get_aggregated_yield(
+        env: Env,
+        internal_pool_id: u64,
+    ) -> i128 {
+        pool_composability::get_aggregated_yield(&env, internal_pool_id)
+    }
+
+    pub fn create_portfolio_snapshot(
+        env: Env,
+        internal_pool_id: u64,
+        total_value: i128,
+    ) -> Result<pool_composability::PortfolioSnapshot, ContractError> {
+        pool_composability::create_portfolio_snapshot(&env, internal_pool_id, total_value)
+    }
+
+    pub fn get_portfolio_allocation(
+        env: Env,
+        internal_pool_id: u64,
+    ) -> Vec<pool_composability::PoolAllocation> {
+        pool_composability::get_portfolio_allocation(&env, internal_pool_id)
+    }
+
+    pub fn get_active_external_pools(
+        env: Env,
+    ) -> Vec<pool_composability::ExternalPoolInterface> {
+        pool_composability::get_active_pools(&env)
+    }
+
+    pub fn get_external_pool(
+        env: Env,
+        pool_id: u64,
+    ) -> Result<pool_composability::ExternalPoolInterface, ContractError> {
+        pool_composability::get_external_pool(&env, pool_id)
+    }
+
+    pub fn deactivate_external_pool(
+        env: Env,
+        pool_id: u64,
+    ) -> Result<(), ContractError> {
+        pool_composability::deactivate_pool(&env, pool_id)
+    }
+
+    pub fn get_total_external_tvl(
+        env: Env,
+    ) -> i128 {
+        pool_composability::get_total_external_tvl(&env)
+    }
+
+    pub fn calculate_weighted_average_apy(
+        env: Env,
+        internal_pool_id: u64,
+    ) -> Result<u32, ContractError> {
+        pool_composability::calculate_weighted_avg_apy(&env, internal_pool_id)
     }
 }

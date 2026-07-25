@@ -27,6 +27,7 @@ pub mod detection;
 pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
+pub mod economic_simulation;
 
 #[cfg(test)]
 mod governance_test;
@@ -2968,5 +2969,54 @@ impl QuorumCreditContract {
 
     pub fn is_bridge_nonce_used(env: Env, origin_chain: u32, nonce: u64) -> bool {
         cross_chain::is_bridge_nonce_used(env, origin_chain, nonce)
+    }
+
+    // ── Economic Simulation Testing (Issue #1184) ─────────────────────────────────
+
+    pub fn run_portfolio_stress_test(
+        _env: Env,
+        default_rate_bps: u32,
+        interest_rate_bps: u32,
+        recovery_rate_bps: u32,
+        simulation_count: u32,
+        portfolio_value: i128,
+        seed: u64,
+    ) -> Result<economic_simulation::PortfolioStressTestResult, ContractError> {
+        if default_rate_bps > 10_000 || interest_rate_bps > 10_000 || recovery_rate_bps > 10_000 {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let params = economic_simulation::SimulationParams {
+            default_rate_bps,
+            interest_rate_bps,
+            recovery_rate_bps,
+            simulation_count: if simulation_count == 0 { economic_simulation::DEFAULT_SIMULATION_COUNT } else { simulation_count },
+            portfolio_value,
+        };
+
+        economic_simulation::run_monte_carlo_simulation(&params, seed)
+    }
+
+    pub fn run_stress_test_scenarios(
+        _env: Env,
+        default_rate_bps: u32,
+        interest_rate_bps: u32,
+        recovery_rate_bps: u32,
+        portfolio_value: i128,
+        seed: u64,
+    ) -> Result<Vec<economic_simulation::PortfolioStressTestResult>, ContractError> {
+        if default_rate_bps > 10_000 || interest_rate_bps > 10_000 || recovery_rate_bps > 10_000 {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let params = economic_simulation::SimulationParams {
+            default_rate_bps,
+            interest_rate_bps,
+            recovery_rate_bps,
+            simulation_count: economic_simulation::DEFAULT_SIMULATION_COUNT,
+            portfolio_value,
+        };
+
+        economic_simulation::stress_test_scenarios(&params, seed)
     }
 }

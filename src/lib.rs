@@ -29,6 +29,7 @@ pub mod ipfs_archive;
 pub mod syndication;
 pub mod economic_simulation;
 pub mod loan_tokenization;
+pub mod gas_cost_regression;
 
 #[cfg(test)]
 mod governance_test;
@@ -3102,5 +3103,58 @@ impl QuorumCreditContract {
         token_id: u64,
     ) -> Result<loan_tokenization::LoanToken, ContractError> {
         loan_tokenization::get_loan_token(&env, token_id)
+    }
+
+    // ── Gas Cost Regression Testing (Issue #1186) ─────────────────────────────────
+
+    pub fn set_gas_baseline(
+        env: Env,
+        operation: String,
+        gas_cost: u64,
+    ) -> Result<gas_cost_regression::GasBaseline, ContractError> {
+        gas_cost_regression::set_gas_baseline(&env, operation, gas_cost)
+    }
+
+    pub fn measure_gas_cost(
+        env: Env,
+        operation: String,
+        gas_consumed: u64,
+        build_hash: String,
+    ) -> Result<gas_cost_regression::GasMeasurement, ContractError> {
+        gas_cost_regression::measure_gas_cost(&env, operation, gas_consumed, build_hash)
+    }
+
+    pub fn get_gas_baselines(env: Env) -> Vec<gas_cost_regression::GasBaseline> {
+        gas_cost_regression::get_gas_baselines(&env)
+    }
+
+    pub fn get_gas_baseline(
+        env: Env,
+        operation: String,
+    ) -> Result<gas_cost_regression::GasBaseline, ContractError> {
+        gas_cost_regression::get_gas_baseline(&env, &operation)
+    }
+
+    pub fn calculate_gas_statistics(
+        env: Env,
+        operation: String,
+        lookback_hours: u64,
+    ) -> Result<gas_cost_regression::GasStatistics, ContractError> {
+        gas_cost_regression::calculate_gas_statistics(&env, &operation, lookback_hours)
+    }
+
+    pub fn get_recent_gas_measurements(
+        env: Env,
+        operation: String,
+        limit: u32,
+    ) -> Vec<gas_cost_regression::GasMeasurement> {
+        gas_cost_regression::get_recent_measurements(&env, &operation, limit)
+    }
+
+    pub fn verify_gas_optimization(
+        env: Env,
+        operation: String,
+    ) -> Result<bool, ContractError> {
+        gas_cost_regression::verify_gas_optimization(&env, &operation)
     }
 }

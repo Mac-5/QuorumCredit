@@ -11,7 +11,7 @@ use crate::types::{
     ForbearanceStatus, LoanRecord, LoanStatus, LoanStatusEx, RefinanceRecord, SlashRecord,
     VouchRecord, VoucherStats, YieldDistributionEntry, PaymentRecord, BPS_DENOMINATOR,
     DEFAULT_DYNAMIC_RATE_CONFIG, DEFAULT_FORBEARANCE_DURATION_SECS, MAX_FORBEARANCE_PERIODS,
-    REPUTATION_BONUS_MAX_BPS, SLASH_ESCROW_PERIOD, DEFAULT_REFERRAL_BONUS_BPS, MIN_VOUCH_AGE,
+    REPUTATION_BONUS_MAX_BPS,
     SECS_PER_DAY,
 };
 use soroban_sdk::{panic_with_error, symbol_short, Address, Env, Vec};
@@ -185,7 +185,7 @@ pub fn request_loan(
     }
 
     let now = env.ledger().timestamp();
-    let loan_id = next_loan_id(&env);
+    let _loan_id = next_loan_id(&env);
 
     // ── Credit score tier rewards ────────────────────────────────────────────
     // Apply tier-based yield bonus to base yield rate (Issue #866)
@@ -215,7 +215,7 @@ pub fn request_loan(
         });
     }
 
-    let deadline = now + cfg.loan_duration;
+    let _deadline = now + cfg.loan_duration;
     let loan_id = next_loan_id(&env);
     let total_yield = amount * cfg.yield_bps / 10_000;
 
@@ -464,7 +464,7 @@ pub fn repay(env: Env, borrower: Address, payment: i128) -> Result<(), ContractE
         .and_then(|v| v.checked_add(loan.accrued_interest))
         .expect("total_owed_final overflow");
 
-    let fully_repaid = loan.amount_repaid >= total_owed_final;
+    let _fully_repaid = loan.amount_repaid >= total_owed_final;
 
     let now = env.ledger().timestamp();
     
@@ -1327,7 +1327,7 @@ pub fn defer_payment(env: Env, borrower: Address) -> Result<(), ContractError> {
     Err(ContractError::InvalidStateTransition)
 }
 
-pub fn check_acceleration(env: Env, _borrower: Address) -> Result<(), ContractError> {
+pub fn check_acceleration(_env: Env, _borrower: Address) -> Result<(), ContractError> {
     Err(ContractError::InvalidStateTransition)
 }
 
@@ -1547,7 +1547,7 @@ pub fn get_prepayment_bonus_bps(env: &Env) -> u32 {
 
 /// Calculate and apply the prepayment bonus for early repayment.
 /// Returns the bonus amount awarded (0 if not eligible).
-pub fn apply_prepayment_bonus(env: &Env, borrower: &Address, loan: &LoanRecord) -> i128 {
+pub fn apply_prepayment_bonus(env: &Env, _borrower: &Address, loan: &LoanRecord) -> i128 {
     let now = env.ledger().timestamp();
     if now >= loan.deadline {
         return 0;

@@ -52,9 +52,9 @@ pub use types::*;
 pub use cross_chain::{BridgeAttestation, CrossChainLoanMetadata, UnifiedReputation};
 
 use helpers::{
-    acquire_lock, release_lock, config, get_active_loan_record, has_active_loan, is_zero_address,
+    acquire_lock, release_lock, config, get_active_loan_record, is_zero_address,
     loan_status as helper_loan_status, require_admin_approval, require_allowed_token,
-    require_not_paused, require_valid_token, token, token_client, validate_admin_config,
+    require_not_paused, token, token_client,
 };
 use reputation::ReputationNftExternalClient;
 #[contract]
@@ -522,7 +522,7 @@ impl QuorumCreditContract {
     pub fn request_loan_confidential(
         env: Env,
         borrower: Address,
-        commitment: ConfidentialCommitment,
+        _commitment: ConfidentialCommitment,
         proof: ZkProof,
         threshold: i128,
         loan_purpose: soroban_sdk::String,
@@ -583,7 +583,7 @@ impl QuorumCreditContract {
         }
 
         let cfg = config(&env);
-        let vouches: Vec<VouchRecord> = env
+        let _vouches: Vec<VouchRecord> = env
             .storage()
             .persistent()
             .get(&DataKey::Vouches(borrower.clone()))

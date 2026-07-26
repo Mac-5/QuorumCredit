@@ -60,6 +60,7 @@ pub mod vouch_syndication;
 pub mod vouch_milestones;
 pub mod recurring_payment;
 pub mod loan_priority;
+pub mod audit_verification;
 
 #[cfg(test)]
 mod governance_test;
@@ -1488,6 +1489,39 @@ impl QuorumCreditContract {
         token: Address,
     ) -> Result<String, ContractError> {
         audit::export_vouch_audit_report(env, borrower, voucher, token)
+    }
+
+    // ── Audit Log Completeness & Integrity Verification ──────────────────────
+
+    /// Run a completeness/consistency check over a vouch's audit trail:
+    /// sequence gaps, timestamp monotonicity, and entry completeness.
+    pub fn verify_audit_log_completeness(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<audit_verification::AuditVerificationReport, ContractError> {
+        audit_verification::verify_audit_log_completeness(env, borrower, voucher, token)
+    }
+
+    /// Record a tamper-evidence checksum snapshot of an audit trail's current state.
+    pub fn snapshot_audit_checksum(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<audit_verification::AuditChecksumRecord, ContractError> {
+        audit_verification::snapshot_audit_checksum(env, borrower, voucher, token)
+    }
+
+    /// Re-verify a trail against its last checksum snapshot to detect tampering.
+    pub fn verify_audit_immutability(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<bool, ContractError> {
+        audit_verification::verify_audit_immutability(env, borrower, voucher, token)
     }
 
     // ── Loan Priority / Subordination (senior-junior debt structures) ────────

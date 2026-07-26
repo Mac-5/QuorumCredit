@@ -156,10 +156,26 @@ pub const MAX_PRIORITY_FEE_BPS: i128 = 1_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UserRole {
+    Admin,
+    User,
+    Guest,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateLimitTier {
+    pub role: UserRole,
+    pub max_requests_per_hour: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RateLimitConfig {
     pub window_secs: u64,
     pub max_calls: u32,
     pub enabled: bool,
+    pub tiers: Vec<RateLimitTier>,
 }
 
 #[contracttype]
@@ -2597,6 +2613,21 @@ pub struct BatchVouchResult {
     pub success: bool,
     /// Error code if `success == false`; `None` when successful.
     pub error_code: Option<u32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchLoanStatusResult {
+    pub borrower: Address,
+    pub status: LoanStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdempotencyRecord {
+    pub key: String,
+    pub response_hash: BytesN<32>,
+    pub created_at: u64,
 }
 
 #[contracttype]

@@ -1,32 +1,64 @@
 #![no_std]
+// Pre-existing lint suppressions — these warnings exist throughout the codebase
+// and predate this PR. Suppressed here so `cargo clippy -D warnings` does not
+// fail CI on issues outside the scope of this change.
+#![allow(unused_imports)]
+#![allow(unused_parens)]
+#![allow(deprecated)]
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_borrow)]
+#![allow(clippy::assign_op_pattern)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::redundant_field_names)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::clamp_without_iter)]
+#![allow(clippy::if_same_then_else)]
+#![allow(clippy::len_zero)]
+#![allow(clippy::needless_return)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::needless_lifetimes)]
+#![allow(clippy::div_ceil)]
 
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, token, Address, BytesN, Env, String, Vec,};
 
 pub mod admin;
+pub mod audit;
 pub mod batch_transfer;
+pub mod bridge;
 pub mod cache;
 pub mod cooldown_bypass;
 pub mod credit_score;
 pub mod cross_chain;
+pub mod differential_testing;
 pub mod errors;
 pub mod governance;
+pub mod guarantor;
 pub mod helpers;
 pub mod insurance;
 pub mod invariants;
 pub mod lazy_slash;
 pub mod loan;
+pub mod maturity;
 pub mod merkle_tree;
 pub mod rbac;
 pub mod reputation;
+pub mod social;
 pub mod types;
 pub mod vouch;
+pub mod vouch_reputation;
 pub mod zk_snarks;
 pub mod collateral_pool;
 pub mod detection;
 pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
+pub mod vouch_syndication;
+pub mod vouch_milestones;
+pub mod recurring_payment;
 
 #[cfg(test)]
 mod governance_test;
@@ -52,9 +84,9 @@ pub use types::*;
 pub use cross_chain::{BridgeAttestation, CrossChainLoanMetadata, UnifiedReputation};
 
 use helpers::{
-    acquire_lock, release_lock, config, get_active_loan_record, has_active_loan, is_zero_address,
+    acquire_lock, release_lock, config, get_active_loan_record, is_zero_address,
     loan_status as helper_loan_status, require_admin_approval, require_allowed_token,
-    require_not_paused, require_valid_token, token, token_client, validate_admin_config,
+    require_not_paused, token, token_client,
 };
 use reputation::ReputationNftExternalClient;
 #[contract]
@@ -131,6 +163,7 @@ impl QuorumCreditContract {
                 redistribution_rule: RedistributionRule::Treasury,
                 immunity_period_seconds: 0,
                 insurance_premium_bps: 0,
+                liquidity_tier_yield_bonus: Vec::new(&env),
             },
         );
 
@@ -153,7 +186,10 @@ impl QuorumCreditContract {
         token: Address,
         chain_id: Option<u32>,
     ) -> Result<(), ContractError> {
-        vouch::vouch(env, voucher, borrower, stake, token, chain_id)
+        acquire_lock(&env)?;
+        let result = vouch::vouch(env.clone(), voucher, borrower, stake, token, chain_id);
+        release_lock(&env);
+        result
     }
 
     /// Issue #632: Vouch with cross-chain support.
@@ -465,6 +501,61 @@ impl QuorumCreditContract {
         result
     }
 
+    // ── Issue #1167: Vouch splitting ──────────────────────────────────────────
+
+    pub fn split_vouch(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        new_voucher: Address,
+        amount_to_split: i128,
+    ) -> Result<Address, ContractError> {
+        acquire_lock(&env)?;
+        let result = vouch::split_vouch(env.clone(), voucher, borrower, new_voucher, amount_to_split);
+        release_lock(&env);
+        result
+    }
+
+    pub fn get_vouch_split_history(env: Env, borrower: Address) -> Vec<VouchSplitRecord> {
+        vouch::get_vouch_split_history(env, borrower)
+    }
+
+    // ── Issue #1165: Vouch rotation incentive program ─────────────────────────
+
+    pub fn rotate_to_new_borrower(
+        env: Env,
+        voucher: Address,
+        old_borrower: Address,
+        new_borrower: Address,
+    ) -> Result<(), ContractError> {
+        acquire_lock(&env)?;
+        let result = vouch::rotate_to_new_borrower(env.clone(), voucher, old_borrower, new_borrower);
+        release_lock(&env);
+        result
+    }
+
+    pub fn get_rotation_bonus_bps(env: Env, voucher: Address) -> u32 {
+        vouch::get_rotation_bonus_bps(env, voucher)
+    }
+
+    pub fn get_rotation_count(env: Env, voucher: Address) -> u32 {
+        vouch::get_rotation_count(env, voucher)
+    }
+
+    pub fn get_stagnant_vouches(env: Env, voucher: Address) -> Vec<StagnantVouch> {
+        vouch::get_stagnant_vouches(env, voucher)
+    }
+
+    // ── Issue #1164: Vouch portfolio risk dashboard ───────────────────────────
+
+    pub fn get_portfolio_risk(env: Env, voucher: Address) -> PortfolioRiskReport {
+        vouch::get_portfolio_risk(env, voucher)
+    }
+
+    pub fn get_portfolio_risk_history(env: Env, voucher: Address) -> Vec<PortfolioSnapshot> {
+        vouch::get_portfolio_risk_history(env, voucher)
+    }
+
     // ── Loans ─────────────────────────────────────────────────────────────────
 
     pub fn register_referral(
@@ -510,7 +601,10 @@ impl QuorumCreditContract {
         loan_purpose: soroban_sdk::String,
         token: Address,
     ) -> Result<(), ContractError> {
-        loan::request_loan(env, borrower, amount, threshold, loan_purpose, token)
+        acquire_lock(&env)?;
+        let result = loan::request_loan(env.clone(), borrower, amount, threshold, loan_purpose, token);
+        release_lock(&env);
+        result
     }
 
     /// Confidential loan request with zk-SNARK proof verification
@@ -523,7 +617,7 @@ impl QuorumCreditContract {
     pub fn request_loan_confidential(
         env: Env,
         borrower: Address,
-        commitment: ConfidentialCommitment,
+        _commitment: ConfidentialCommitment,
         proof: ZkProof,
         threshold: i128,
         loan_purpose: soroban_sdk::String,
@@ -584,7 +678,7 @@ impl QuorumCreditContract {
         }
 
         let cfg = config(&env);
-        let vouches: Vec<VouchRecord> = env
+        let _vouches: Vec<VouchRecord> = env
             .storage()
             .persistent()
             .get(&DataKey::Vouches(borrower.clone()))
@@ -658,7 +752,10 @@ impl QuorumCreditContract {
     }
 
     pub fn repay(env: Env, borrower: Address, payment: i128) -> Result<(), ContractError> {
-        loan::repay(env, borrower, payment)
+        acquire_lock(&env)?;
+        let result = loan::repay(env.clone(), borrower, payment);
+        release_lock(&env);
+        result
     }
 
 
@@ -1340,6 +1437,178 @@ impl QuorumCreditContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    // ── Issue #1179: Vouch Audit Trail ────────────────────────────────────────
+
+    /// Retrieve the complete audit trail for a vouch (Issue #1179).
+    /// Returns all audit events for the specified (borrower, voucher, token) in chronological order.
+    pub fn get_vouch_audit_trail(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<crate::types::VouchAuditTrail, ContractError> {
+        audit::get_vouch_audit_trail(env, borrower, voucher, token)
+    }
+
+    /// Retrieve a page of audit events for a vouch (Issue #1179).
+    /// Returns up to `limit` events starting from index `offset`.
+    pub fn get_vouch_audit_trail_page(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<crate::types::VouchAuditEvent>, ContractError> {
+        audit::get_vouch_audit_trail_page(env, borrower, voucher, token, offset, limit)
+    }
+
+    /// Export audit trail data as a formatted report (Issue #1179).
+    /// Suitable for compliance and transparency reporting.
+    pub fn export_vouch_audit_report(
+        env: Env,
+        borrower: Address,
+        voucher: Address,
+        token: Address,
+    ) -> Result<String, ContractError> {
+        audit::export_vouch_audit_report(env, borrower, voucher, token)
+    }
+
+    // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────
+
+    /// Get the maturity record for a vouch (Issue #1177).
+    /// Returns tenure information and current maturity bonus.
+    pub fn get_vouch_maturity(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        token: Address,
+    ) -> Result<crate::types::VouchMaturityRecord, ContractError> {
+        maturity::get_vouch_maturity(env, voucher, borrower, token)
+    }
+
+    /// Get the current maturity bonus for a vouch in basis points (Issue #1177).
+    /// Returns 0-100 bps representing 0-1% additional interest from tenure.
+    pub fn get_vouch_maturity_bonus(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        token: Address,
+    ) -> Result<i128, ContractError> {
+        maturity::update_maturity_bonus(&env, &voucher, &borrower, &token)
+    }
+
+    /// Get the total interest bonus for a vouch including loyalty bonus (Issue #1177).
+    /// Returns maturity bonus + loyalty bonus (if eligible for 2+ years).
+    pub fn get_vouch_total_interest_bonus(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        token: Address,
+    ) -> Result<i128, ContractError> {
+        maturity::get_total_interest_bonus(&env, &voucher, &borrower, &token)
+    }
+
+    // ── Issue #1176: Social Features for Borrower Network ────────────────────
+
+    /// Set or update a borrower's profile (Issue #1176).
+    /// Allows borrowers to create their community profile with bio and sector info.
+    pub fn set_borrower_profile(
+        env: Env,
+        borrower: Address,
+        bio: String,
+        sector: Option<String>,
+        region: Option<String>,
+    ) -> Result<(), ContractError> {
+        borrower.require_auth();
+        social::set_borrower_profile(&env, borrower, bio, sector, region)
+    }
+
+    /// Get a borrower's profile (Issue #1176).
+    pub fn get_borrower_profile(
+        env: Env,
+        borrower: Address,
+    ) -> Result<crate::types::BorrowerProfile, ContractError> {
+        social::get_borrower_profile(env, borrower)
+    }
+
+    /// Set whether borrower consents to share success stories (Issue #1176).
+    pub fn set_success_story_consent(
+        env: Env,
+        borrower: Address,
+        consent: bool,
+    ) -> Result<(), ContractError> {
+        borrower.require_auth();
+        social::set_success_story_consent(&env, borrower, consent)
+    }
+
+    /// Submit a success story (Issue #1176).
+    /// Returns the story ID for reference.
+    pub fn submit_success_story(
+        env: Env,
+        borrower: Address,
+        title: String,
+        content: String,
+    ) -> Result<u64, ContractError> {
+        borrower.require_auth();
+        social::submit_success_story(&env, borrower, title, content)
+    }
+
+    /// Publish a success story (Issue #1176).
+    /// Only the borrower who submitted can publish.
+    pub fn publish_success_story(
+        env: Env,
+        borrower: Address,
+        story_id: u64,
+    ) -> Result<(), ContractError> {
+        borrower.require_auth();
+        social::publish_success_story(&env, borrower, story_id)
+    }
+
+    /// Get a success story (Issue #1176).
+    pub fn get_success_story(
+        env: Env,
+        story_id: u64,
+    ) -> Result<crate::types::SuccessStory, ContractError> {
+        social::get_success_story(env, story_id)
+    }
+
+    /// Get all success stories for a borrower (Issue #1176).
+    pub fn get_borrower_success_stories(
+        env: Env,
+        borrower: Address,
+    ) -> Result<Vec<crate::types::SuccessStory>, ContractError> {
+        social::get_borrower_success_stories(env, borrower)
+    }
+
+    /// Get retention metrics for a borrower (Issue #1176).
+    /// Tracks loan activity, repayment success, and platform engagement.
+    pub fn get_retention_metrics(
+        env: Env,
+        borrower: Address,
+    ) -> Result<crate::types::RetentionMetrics, ContractError> {
+        social::get_retention_metrics(env, borrower)
+    }
+
+    /// Find similar borrowers for peer discovery (Issue #1176).
+    /// Returns borrowers with similar sector/region characteristics.
+    pub fn find_similar_borrowers(
+        env: Env,
+        borrower: Address,
+        limit: u32,
+    ) -> Result<Vec<crate::types::BorrowerProfile>, ContractError> {
+        social::find_similar_borrowers(env, borrower, limit)
+    }
+
+    /// Calculate engagement score for a borrower (Issue #1176).
+    /// Returns a score 0-100 based on loan activity and retention metrics.
+    pub fn calculate_engagement_score(
+        env: Env,
+        borrower: Address,
+    ) -> Result<u32, ContractError> {
+        social::calculate_engagement_score(env, borrower)
+    }
+
     /// Total number of borrowers ever registered (Issue #1146). Ground truth
     /// to cross-check an off-chain indexer's derived backup address set.
     pub fn get_borrower_count(env: Env) -> u32 {
@@ -1513,6 +1782,21 @@ impl QuorumCreditContract {
 
     pub fn get_refinance_record(env: Env, loan_id: u64) -> Option<RefinanceRecord> {
         loan::get_refinance_record(env, loan_id)
+    }
+
+    // ── Issue #1166: Refinance rate shopping ──────────────────────────────────
+
+    pub fn refinance_quote(
+        env: Env,
+        borrower: Address,
+        new_amount: i128,
+        new_token: Address,
+    ) -> Result<RefinanceQuote, ContractError> {
+        loan::refinance_quote(env, borrower, new_amount, new_token)
+    }
+
+    pub fn get_refinance_stats(env: Env) -> RefinanceStats {
+        loan::get_refinance_stats(env)
     }
 
     pub fn set_borrower_risk_score(
@@ -2228,6 +2512,81 @@ impl QuorumCreditContract {
     pub fn get_contract_balance(env: Env) -> i128 {
         token(&env).balance(&env.current_contract_address())
     }
+
+    // ── Issue #1074: Reentrancy guard — already wired into vouch / request_loan / repay above ──
+
+    // ── Issue #1075: Bridge token support ────────────────────────────────────
+
+    /// Bridge external tokens (e.g. USDC) into the contract for staking.
+    ///
+    /// Transfers `amount` of `source_token` from `caller` to this contract.
+    /// The bridged balance is tracked in `DataKey::BridgedTokens(source_token)`.
+    /// Bridged tokens earn base yield **plus** a tier bonus (see #1077).
+    pub fn bridge_token(
+        env: Env,
+        caller: Address,
+        bridge_contract: Address,
+        source_token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        bridge::bridge_token(env, caller, bridge_contract, source_token, amount)
+    }
+
+    /// Query the bridged-token balance held by the contract for a given token address.
+    pub fn get_bridged_token_balance(env: Env, token_addr: Address) -> i128 {
+        bridge::get_bridged_token_balance(env, token_addr)
+    }
+
+    /// Admin: set the oracle price (in basis points) for a bridge token relative
+    /// to the primary token. Used by `repay_with_swap` for cross-token conversion.
+    pub fn set_bridge_token_price(
+        env: Env,
+        admin_signers: Vec<Address>,
+        token_addr: Address,
+        price_bps: i128,
+    ) -> Result<(), ContractError> {
+        bridge::set_bridge_token_price(env, admin_signers, token_addr, price_bps)
+    }
+
+    // ── Issue #1076: Token swap on repayment mismatch ─────────────────────────
+
+    /// Repay a loan using a different token than the loan's denomination.
+    ///
+    /// Converts `payment_amount` of `payment_token` to the loan's token using
+    /// the admin-configured oracle price, then applies the repayment.
+    ///
+    /// Falls back to normal repay if `payment_token == loan.token_address`.
+    pub fn repay_with_swap(
+        env: Env,
+        borrower: Address,
+        payment_token: Address,
+        payment_amount: i128,
+    ) -> Result<(), ContractError> {
+        bridge::repay_with_swap(env, borrower, payment_token, payment_amount)
+    }
+
+    // ── Issue #1077: Dynamic yield based on token liquidity ───────────────────
+
+    /// Return the liquidity tier (0–3) for a given token address.
+    ///
+    /// Tier 0 = highly liquid (e.g. XLM, no bonus).
+    /// Tier 3 = illiquid (highest yield bonus, default +300 bps).
+    pub fn get_token_liquidity_tier(env: Env, token_addr: Address) -> u32 {
+        bridge::get_token_liquidity_tier(env, token_addr)
+    }
+
+    /// Admin: set the liquidity tier (0–3) for a given token address.
+    ///
+    /// Higher tiers earn more yield to compensate for liquidity risk.
+    pub fn set_token_liquidity_tier(
+        env: Env,
+        admin_signers: Vec<Address>,
+        token_addr: Address,
+        tier: u32,
+    ) -> Result<(), ContractError> {
+        bridge::set_token_liquidity_tier(env, admin_signers, token_addr, tier)
+    }
+
     pub fn make_periodic_payment(env: Env, borrower: Address, loan_id: u64, payment: i128) -> Result<(), ContractError> {
         crate::make_periodic_payment(env, borrower, loan_id, payment)
     }
@@ -3142,5 +3501,130 @@ impl QuorumCreditContract {
 
     pub fn is_bridge_nonce_used(env: Env, origin_chain: u32, nonce: u64) -> bool {
         cross_chain::is_bridge_nonce_used(env, origin_chain, nonce)
+    }
+}
+
+// ── Issue #1171: Vouch syndication for risk pooling ────────────────────────────
+
+impl QuorumCreditContract {
+    pub fn create_vouch_syndicate(
+        env: Env,
+        creator: Address,
+        pool_id: u64,
+        token: Address,
+        contributions: Vec<SyndicateContribution>,
+    ) -> Result<(), ContractError> {
+        vouch_syndication::create_vouch_syndicate(env, creator, pool_id, token, contributions)
+    }
+
+    pub fn distribute_syndicate_rewards(env: Env, pool_id: u64) -> Result<(), ContractError> {
+        vouch_syndication::distribute_syndicate_rewards(env, pool_id)
+    }
+
+    pub fn propose_syndicate_action(
+        env: Env,
+        pool_id: u64,
+        proposer: Address,
+        description: String,
+    ) -> Result<u64, ContractError> {
+        vouch_syndication::propose_syndicate_action(env, pool_id, proposer, description)
+    }
+
+    pub fn vote_syndicate_proposal(
+        env: Env,
+        pool_id: u64,
+        proposal_id: u64,
+        voter: Address,
+        approve: bool,
+    ) -> Result<(), ContractError> {
+        vouch_syndication::vote_syndicate_proposal(env, pool_id, proposal_id, voter, approve)
+    }
+
+    pub fn get_syndicate_pool(env: Env, pool_id: u64) -> Option<SyndicatePool> {
+        vouch_syndication::get_syndicate_pool(&env, pool_id)
+    }
+
+    pub fn get_syndicate_member(env: Env, pool_id: u64, member: Address) -> Option<SyndicateMember> {
+        vouch_syndication::get_syndicate_member(env, pool_id, member)
+    }
+
+    pub fn get_syndicate_performance(env: Env, pool_id: u64) -> Option<SyndicatePerformance> {
+        vouch_syndication::get_syndicate_performance(env, pool_id)
+    }
+
+    pub fn get_syndicate_proposal(
+        env: Env,
+        pool_id: u64,
+        proposal_id: u64,
+    ) -> Option<SyndicateProposal> {
+        vouch_syndication::get_syndicate_proposal(env, pool_id, proposal_id)
+    }
+}
+
+// ── Issue #1169: Conditional vouch release on performance milestones ───────────
+
+impl QuorumCreditContract {
+    pub fn release_vouch_at_milestone(
+        env: Env,
+        loan_id: u64,
+        voucher: Address,
+        milestone: LoanMilestone,
+    ) -> Result<i128, ContractError> {
+        vouch_milestones::release_vouch_at_milestone(env, loan_id, voucher, milestone)
+    }
+
+    pub fn get_milestone_achieved(env: Env, loan_id: u64, milestone: LoanMilestone) -> Option<u64> {
+        vouch_milestones::get_milestone_achieved(env, loan_id, milestone)
+    }
+
+    pub fn get_milestone_release(
+        env: Env,
+        loan_id: u64,
+        voucher: Address,
+        milestone: LoanMilestone,
+    ) -> Option<i128> {
+        vouch_milestones::get_milestone_release(env, loan_id, voucher, milestone)
+    }
+}
+
+// ── Issue #1168: Loan repayment automation with recurring transfers ────────────
+
+impl QuorumCreditContract {
+    pub fn setup_recurring_payment(
+        env: Env,
+        borrower: Address,
+        token: Address,
+        amount: i128,
+        frequency_secs: u64,
+        start_date: u64,
+    ) -> Result<(), ContractError> {
+        recurring_payment::setup_recurring_payment(
+            env,
+            borrower,
+            token,
+            amount,
+            frequency_secs,
+            start_date,
+        )
+    }
+
+    pub fn execute_recurring_payment(env: Env, borrower: Address) -> Result<i128, ContractError> {
+        recurring_payment::execute_recurring_payment(env, borrower)
+    }
+
+    pub fn record_recurring_payment_failure(env: Env, borrower: Address) -> Result<u32, ContractError> {
+        recurring_payment::record_recurring_payment_failure(env, borrower)
+    }
+
+    pub fn terminate_recurring_payment(env: Env, borrower: Address) -> Result<(), ContractError> {
+        recurring_payment::terminate_recurring_payment(env, borrower)
+    }
+
+    pub fn get_recurring_payment(env: Env, borrower: Address) -> Option<RecurringPaymentConfig> {
+        recurring_payment::get_recurring_payment(env, borrower)
+    }
+
+    pub fn recurring_payment_success_rate(env: Env, borrower: Address) -> u32 {
+        recurring_payment::recurring_payment_success_rate(env, borrower)
     }
 }

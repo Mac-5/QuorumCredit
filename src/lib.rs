@@ -59,6 +59,7 @@ pub mod syndication;
 pub mod vouch_syndication;
 pub mod vouch_milestones;
 pub mod recurring_payment;
+pub mod loan_priority;
 
 #[cfg(test)]
 mod governance_test;
@@ -1487,6 +1488,54 @@ impl QuorumCreditContract {
         token: Address,
     ) -> Result<String, ContractError> {
         audit::export_vouch_audit_report(env, borrower, voucher, token)
+    }
+
+    // ── Loan Priority / Subordination (senior-junior debt structures) ────────
+
+    /// Build (or replace) the loan priority queue, tagging each loan Senior,
+    /// Mezzanine, or Junior.
+    pub fn create_loan_priority_queue(
+        env: Env,
+        admin_signers: Vec<Address>,
+        loans: Vec<loan_priority::PriorityLoanEntry>,
+    ) -> Result<(), ContractError> {
+        loan_priority::create_loan_priority_queue(env, admin_signers, loans)
+    }
+
+    pub fn get_loan_priority_queue(env: Env) -> Vec<loan_priority::PriorityLoanEntry> {
+        loan_priority::get_loan_priority_queue(env)
+    }
+
+    /// Route recovered default proceeds through the Senior/Mezzanine/Junior waterfall.
+    pub fn route_default_proceeds(
+        env: Env,
+        admin_signers: Vec<Address>,
+        total_proceeds: i128,
+    ) -> Result<loan_priority::WaterfallRun, ContractError> {
+        loan_priority::route_default_proceeds(env, admin_signers, total_proceeds)
+    }
+
+    pub fn get_waterfall_run(env: Env, run_id: u64) -> Option<loan_priority::WaterfallRun> {
+        loan_priority::get_waterfall_run(env, run_id)
+    }
+
+    /// Propose a governance change to a loan's priority tranche.
+    pub fn propose_priority_change(
+        env: Env,
+        proposer: Address,
+        loan_id: u64,
+        new_priority: loan_priority::LoanPriority,
+    ) -> Result<u64, ContractError> {
+        loan_priority::propose_priority_change(env, proposer, loan_id, new_priority)
+    }
+
+    /// Approve a pending priority-change proposal; executes once threshold is met.
+    pub fn approve_priority_change(
+        env: Env,
+        approver: Address,
+        proposal_id: u64,
+    ) -> Result<bool, ContractError> {
+        loan_priority::approve_priority_change(env, approver, proposal_id)
     }
 
     // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────

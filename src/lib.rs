@@ -82,6 +82,14 @@ mod tests;
 mod rbac_enforcement_test;
 #[cfg(test)]
 mod storage_redesign_test;
+#[cfg(test)]
+mod timelock_safety_test;
+#[cfg(test)]
+mod contingent_loan_test;
+#[cfg(test)]
+mod cross_chain_test_scenarios;
+#[cfg(test)]
+mod loan_tranching_test;
 
 pub use errors::ContractError;
 pub use types::*;

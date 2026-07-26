@@ -1802,6 +1802,182 @@ pub struct ArchivedLoanRecord {
     pub token_address: Address,
 }
 
+/// Issue #1172: Guarantor record for a loan.
+/// Tracks the guarantor backing a loan and their obligations.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorRecord {
+    /// Loan ID this guarantor is backing
+    pub loan_id: u64,
+    /// Guarantor address
+    pub guarantor: Address,
+    /// Guarantor signature commitment (to verify backing)
+    pub signature_verified: bool,
+    /// Amount guaranteed (in stroops) — can be less than full loan amount
+    pub guarantee_amount: i128,
+    /// Timestamp when guarantor was requested for this loan
+    pub requested_at: u64,
+    /// Timestamp when guarantor was released (None if still active)
+    pub released_at: Option<u64>,
+    /// Status of the guarantee
+    pub status: GuaranteeStatus,
+}
+
+/// Status of a guarantee.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GuaranteeStatus {
+    /// Guarantee is active and binding
+    Active,
+    /// Guarantee has been released after loan completion
+    Released,
+    /// Guarantee has been triggered (borrower defaulted)
+    Triggered,
+    /// Guarantee has been claimed (funds distributed)
+    Claimed,
+}
+
+/// Issue #1172: Guarantor obligation tracking.
+/// Tracks what the guarantor owes if the borrower defaults.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorObligation {
+    /// Guarantor address
+    pub guarantor: Address,
+    /// Loan ID
+    pub loan_id: u64,
+    /// Borrower address
+    pub borrower: Address,
+    /// Maximum amount guarantor is liable for (in stroops)
+    pub max_liability: i128,
+    /// Amount already paid by guarantor (in stroops)
+    pub amount_paid: i128,
+    /// Timestamp when obligation was created
+    pub created_at: u64,
+    /// Timestamp when obligation was fulfilled or waived
+    pub closed_at: Option<u64>,
+}
+
+/// Issue #1172: Guarantor reputation and statistics.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorStats {
+    /// Total number of guarantees provided
+    pub total_guarantees: u32,
+    /// Number of successfully fulfilled guarantees
+    pub successful_guarantees: u32,
+    /// Number of triggered guarantees (defaults)
+    pub triggered_guarantees: u32,
+    /// Total amount guaranteed across all loans (in stroops)
+    pub total_guaranteed: i128,
+    /// Total amount paid out on triggered guarantees (in stroops)
+    pub total_paid_out: i128,
+    /// Reputation score (0-1000): higher = better guarantor
+    pub reputation_score: u32,
+    /// Last active timestamp
+    pub last_activity: u64,
+}
+
+/// Issue #1175: Vouch slashing protection bond.
+/// Bonds limit the maximum loss a voucher can suffer if a borrower defaults.
+#[contracttype]
+#[derive(Clone)]
+pub struct VouchProtectionBond {
+    /// Voucher address
+    pub voucher: Address,
+    /// Loan ID this bond is protecting
+    pub loan_id: u64,
+    /// Vouch ID (typically matches loan_id in current design)
+    pub vouch_id: u64,
+    /// Bond amount staked (in stroops) - covers up to 50% of vouch amount
+    pub bond_amount: i128,
+    /// The vouch stake this bond is protecting
+    pub protected_stake: i128,
+    /// Timestamp when bond was created
+    pub created_at: u64,
+    /// Amount of bond used to cover slash (in stroops)
+    pub amount_used: i128,
+    /// Timestamp when bond was released (None if still active)
+    pub released_at: Option<u64>,
+    /// Status of the bond
+    pub status: BondStatus,
+    /// Whether optional bond insurance was purchased
+    pub has_insurance: bool,
+}
+
+/// Status of a vouch protection bond.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BondStatus {
+    /// Bond is active and protecting the vouch
+    Active,
+    /// Bond has been partially used to cover a slash
+    PartiallyUsed,
+    /// Bond has been fully used to cover a slash
+    Exhausted,
+    /// Bond has been released after loan completion
+    Released,
+}
+
+/// Issue #1175: Optional bond insurance.
+/// Provides additional coverage for the bond with a 3% premium surcharge.
+#[contracttype]
+#[derive(Clone)]
+pub struct BondInsuranceRecord {
+    /// Voucher address
+    pub voucher: Address,
+    /// Loan ID
+    pub loan_id: u64,
+    /// Bond amount covered by insurance
+    pub insured_bond_amount: i128,
+    /// Insurance premium paid (3% of bond amount)
+    pub premium_paid: i128,
+    /// Maximum payout (typically 100% of bond amount)
+    pub max_coverage: i128,
+    /// Amount claimed under insurance (if any)
+    pub amount_claimed: i128,
+    /// Status of the insurance
+    pub status: InsuranceStatus,
+    /// Timestamp when insurance was purchased
+    pub purchased_at: u64,
+}
+
+/// Status of bond insurance.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InsuranceStatus {
+    /// Insurance is active
+    Active,
+    /// Insurance claim has been paid
+    Claimed,
+    /// Insurance has been cancelled/released
+    Released,
+}
+
+/// Issue #1175: Bond tracking and statistics.
+#[contracttype]
+#[derive(Clone)]
+pub struct BondStats {
+    /// Voucher address
+    pub voucher: Address,
+    /// Total bond amount across all loans (in stroops)
+    pub total_bonded: i128,
+    /// Total bond amount used to cover slashes (in stroops)
+    pub total_used: i128,
+    /// Number of active bonds
+    pub active_bonds: u32,
+    /// Number of times this voucher's bond was used
+    pub times_bond_used: u32,
+    /// Total bond insurance premiums paid (in stroops)
+    pub total_insurance_premiums: i128,
+    /// Number of insurance claims paid
+    pub insurance_claims_paid: u32,
+    /// Total insurance payout (in stroops)
+    pub total_insurance_payout: i128,
+    /// Last activity timestamp
+    pub last_activity: u64,
+}
+
 /// A reference to archived data stored on IPFS.
 /// The actual data blob is stored on IPFS, and this contract maintains the hash for retrieval.
 #[contracttype]
@@ -1859,6 +2035,47 @@ pub struct VouchRecord {
     /// Optional chain ID for cross-chain vouches. `None` means native Stellar.
     /// When set, the token must originate from a registered bridge for that chain.
     pub chain_id: Option<u32>,
+}
+
+/// Issue #1173: Vouch reputation weighted strength.
+/// Tracks the reputation-adjusted strength of a vouch in quorum calculations.
+#[contracttype]
+#[derive(Clone)]
+pub struct VouchReputationWeight {
+    /// Vouch ID (same as loan_id for now)
+    pub vouch_id: u64,
+    /// Base strength of the vouch (the raw stake)
+    pub base_strength: i128,
+    /// Voucher's reputation score (0-1000)
+    pub voucher_reputation: u32,
+    /// Calculated weighted strength: base_strength × (1 + (reputation / 1000))
+    /// Capped at 1.5x multiplier for reputation >= 1500
+    pub weighted_strength: i128,
+    /// Weight multiplier applied (in basis points, e.g., 1000 = 1.0x, 1500 = 1.5x)
+    pub weight_multiplier_bps: u32,
+    /// Timestamp when weight was last calculated
+    pub calculated_at: u64,
+}
+
+/// Issue #1173: Weighted vouch distribution for a borrower.
+/// Tracks aggregate reputation-weighted vouch strength for quorum calculations.
+#[contracttype]
+#[derive(Clone)]
+pub struct WeightedVouchDistribution {
+    /// Borrower address
+    pub borrower: Address,
+    /// Token address
+    pub token: Address,
+    /// Total base stake (unweighted)
+    pub total_base_stake: i128,
+    /// Total weighted stake (reputation-adjusted)
+    pub total_weighted_stake: i128,
+    /// Number of vouches contributing
+    pub vouch_count: u32,
+    /// Average weight multiplier across all vouches (in basis points)
+    pub average_weight_multiplier_bps: u32,
+    /// Timestamp when distribution was last updated
+    pub updated_at: u64,
 }
 
 /// Metadata for a registered cross-chain bridge.

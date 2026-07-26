@@ -773,30 +773,24 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
-
-    // ── Issue #1171: Vouch syndication ───────────────────────────────────────
-    /// pool_id → SyndicatePool
-    SyndicatePool(u64),
-    /// (pool_id, member) → SyndicateMember
-    SyndicateMember(u64, Address),
-    /// pool_id → SyndicatePerformance
-    SyndicatePerformance(u64),
-    /// pool_id → next proposal id counter for that syndicate's governance
-    SyndicateProposalCounter(u64),
-    /// (pool_id, proposal_id) → SyndicateProposal
-    SyndicateProposal(u64, u64),
-    /// (pool_id, proposal_id, member) → bool already voted
-    SyndicateProposalVote(u64, u64, Address),
-
-    // ── Issue #1169: Milestone-based vouch release ───────────────────────────
-    /// (loan_id, milestone as u32) → u64 timestamp the milestone was achieved
-    MilestoneAchieved(u64, u32),
-    /// (loan_id, voucher, milestone as u32) → i128 amount released for that voucher
-    VouchMilestoneRelease(u64, Address, u32),
-
-    // ── Issue #1168: Recurring repayment automation ──────────────────────────
-    /// borrower → RecurringPaymentConfig
-    RecurringPayment(Address),
+    // ── Vouch splitting (Issue #1167) ────────────────────────────────────────
+    /// borrower → Vec<VouchSplitRecord> genealogy of every split performed
+    /// against a vouch for this borrower (parent voucher → child voucher).
+    VouchSplitHistory(Address),
+    // ── Vouch rotation incentives (Issue #1165) ──────────────────────────────
+    /// voucher → u64 ledger timestamp of the voucher's most recent rotation.
+    LastRotationTimestamp(Address),
+    /// voucher → u32 total number of rotations performed by this voucher.
+    RotationCount(Address),
+    /// voucher → u32 basis-point yield bonus earned from quarterly rotation.
+    RotationBonusBps(Address),
+    // ── Vouch portfolio risk (Issue #1164) ───────────────────────────────────
+    /// voucher → Vec<PortfolioSnapshot> historical evolution of the voucher's
+    /// portfolio, appended each time the portfolio risk report is read.
+    VoucherPortfolioHistory(Address),
+    // ── Refinance rate shopping (Issue #1166) ────────────────────────────────
+    /// Global aggregate statistics for `refinance_loan` usage.
+    RefinanceStats,
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -1646,6 +1640,135 @@ pub struct RefinanceRecord {
     pub old_rate_bps: i128,
     pub new_rate_bps: i128,
     pub refinanced_at: u64,
+}
+
+/// Issue #1166: A non-binding quote for refinancing a borrower's active loan,
+/// used for rate shopping before committing to `refinance_loan`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefinanceQuote {
+    pub borrower: Address,
+    pub old_loan_id: u64,
+    /// Outstanding balance (principal + yield - repaid) on the active loan.
+    pub outstanding: i128,
+    /// Effective rate, in basis points, of the current loan.
+    pub old_rate_bps: i128,
+    /// Effective rate the borrower would receive today, in basis points,
+    /// accounting for their current credit tier.
+    pub new_rate_bps: i128,
+    /// Whether the borrower currently qualifies for a beneficial refinance
+    /// (new_rate_bps < old_rate_bps and the loan has not passed its deadline).
+    pub eligible: bool,
+    /// Estimated interest cost saved over one year on the outstanding
+    /// balance at the new rate vs. the old rate. Negative if the new rate
+    /// is worse.
+    pub estimated_annual_savings: i128,
+    /// One-time protocol fee charged on the new loan amount, in stroops.
+    pub refinance_fee: i128,
+    /// Days of accrued savings needed to offset `refinance_fee`. `None` when
+    /// the refinance produces no savings (fee is never recouped).
+    pub breakeven_days: Option<u64>,
+}
+
+/// Issue #1166: Global aggregate statistics for refinance usage.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefinanceStats {
+    pub total_refinances: u32,
+    /// Sum of `old_rate_bps - new_rate_bps` (in bps) across all refinances,
+    /// weighted by nothing — a simple running total for reporting.
+    pub total_rate_reduction_bps: i128,
+    /// Sum of estimated annual savings (in stroops) across all refinances,
+    /// computed the same way as `RefinanceQuote::estimated_annual_savings`.
+    pub total_estimated_savings: i128,
+}
+
+/// Issue #1167: One entry in a vouch's split genealogy — records that
+/// `amount` was carved out of `parent_voucher`'s vouch and given to
+/// `child_voucher` as a new, independent vouch for the same borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VouchSplitRecord {
+    pub parent_voucher: Address,
+    pub child_voucher: Address,
+    pub borrower: Address,
+    pub amount: i128,
+    pub split_at: u64,
+}
+
+/// Issue #1165: A vouch that has not rotated in a long time and is a
+/// candidate for `rotate_to_new_borrower`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagnantVouch {
+    pub voucher: Address,
+    pub borrower: Address,
+    pub stake: i128,
+    pub days_since_rotation: u64,
+}
+
+/// Issue #1164: A single borrower's share of a voucher's total exposure.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerExposure {
+    pub borrower: Address,
+    pub stake: i128,
+    /// Share of the voucher's total stake, in basis points (10_000 = 100%).
+    pub pct_bps: u32,
+}
+
+/// Issue #1164: A voucher's exposure to a single token, used as the
+/// "sector" concentration axis (asset-class diversification).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenExposure {
+    pub token: Address,
+    pub stake: i128,
+    pub pct_bps: u32,
+}
+
+/// Issue #1164: A voucher's exposure to a single chain, used as the
+/// "region" concentration axis. `chain_id = None` means native Stellar.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChainExposure {
+    pub chain_id: Option<u32>,
+    pub stake: i128,
+    pub pct_bps: u32,
+}
+
+/// Issue #1164: A point-in-time snapshot of a voucher's portfolio, appended
+/// to `DataKey::VoucherPortfolioHistory` whenever the risk report is read.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortfolioSnapshot {
+    pub timestamp: u64,
+    pub total_stake: i128,
+    pub borrower_count: u32,
+}
+
+/// Issue #1164: Full portfolio risk report for a voucher.
+#[contracttype]
+#[derive(Clone)]
+pub struct PortfolioRiskReport {
+    pub voucher: Address,
+    pub total_stake: i128,
+    pub borrower_count: u32,
+    pub borrower_breakdown: Vec<BorrowerExposure>,
+    pub token_breakdown: Vec<TokenExposure>,
+    pub chain_breakdown: Vec<ChainExposure>,
+    /// Herfindahl-Hirschman-style concentration index over borrower shares,
+    /// in basis points (sum of pct_bps^2 / 10_000). Higher = more concentrated.
+    pub concentration_hhi_bps: u32,
+    /// Estimated loss if 1% of the voucher's backed borrowers default,
+    /// weighted by stake (see `portfolio_risk` for the exact model).
+    pub estimated_loss_1pct: i128,
+    /// Estimated loss at a 5% default rate.
+    pub estimated_loss_5pct: i128,
+    /// Estimated loss at a 10% default rate.
+    pub estimated_loss_10pct: i128,
+    pub recommendations: Vec<soroban_sdk::String>,
+    pub history: Vec<PortfolioSnapshot>,
 }
 
 #[contracttype]

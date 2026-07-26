@@ -467,6 +467,61 @@ impl QuorumCreditContract {
         result
     }
 
+    // ── Issue #1167: Vouch splitting ──────────────────────────────────────────
+
+    pub fn split_vouch(
+        env: Env,
+        voucher: Address,
+        borrower: Address,
+        new_voucher: Address,
+        amount_to_split: i128,
+    ) -> Result<Address, ContractError> {
+        acquire_lock(&env)?;
+        let result = vouch::split_vouch(env.clone(), voucher, borrower, new_voucher, amount_to_split);
+        release_lock(&env);
+        result
+    }
+
+    pub fn get_vouch_split_history(env: Env, borrower: Address) -> Vec<VouchSplitRecord> {
+        vouch::get_vouch_split_history(env, borrower)
+    }
+
+    // ── Issue #1165: Vouch rotation incentive program ─────────────────────────
+
+    pub fn rotate_to_new_borrower(
+        env: Env,
+        voucher: Address,
+        old_borrower: Address,
+        new_borrower: Address,
+    ) -> Result<(), ContractError> {
+        acquire_lock(&env)?;
+        let result = vouch::rotate_to_new_borrower(env.clone(), voucher, old_borrower, new_borrower);
+        release_lock(&env);
+        result
+    }
+
+    pub fn get_rotation_bonus_bps(env: Env, voucher: Address) -> u32 {
+        vouch::get_rotation_bonus_bps(env, voucher)
+    }
+
+    pub fn get_rotation_count(env: Env, voucher: Address) -> u32 {
+        vouch::get_rotation_count(env, voucher)
+    }
+
+    pub fn get_stagnant_vouches(env: Env, voucher: Address) -> Vec<StagnantVouch> {
+        vouch::get_stagnant_vouches(env, voucher)
+    }
+
+    // ── Issue #1164: Vouch portfolio risk dashboard ───────────────────────────
+
+    pub fn get_portfolio_risk(env: Env, voucher: Address) -> PortfolioRiskReport {
+        vouch::get_portfolio_risk(env, voucher)
+    }
+
+    pub fn get_portfolio_risk_history(env: Env, voucher: Address) -> Vec<PortfolioSnapshot> {
+        vouch::get_portfolio_risk_history(env, voucher)
+    }
+
     // ── Loans ─────────────────────────────────────────────────────────────────
 
     pub fn register_referral(
@@ -1485,6 +1540,21 @@ impl QuorumCreditContract {
 
     pub fn get_refinance_record(env: Env, loan_id: u64) -> Option<RefinanceRecord> {
         loan::get_refinance_record(env, loan_id)
+    }
+
+    // ── Issue #1166: Refinance rate shopping ──────────────────────────────────
+
+    pub fn refinance_quote(
+        env: Env,
+        borrower: Address,
+        new_amount: i128,
+        new_token: Address,
+    ) -> Result<RefinanceQuote, ContractError> {
+        loan::refinance_quote(env, borrower, new_amount, new_token)
+    }
+
+    pub fn get_refinance_stats(env: Env) -> RefinanceStats {
+        loan::get_refinance_stats(env)
     }
 
     pub fn set_borrower_risk_score(

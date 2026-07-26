@@ -244,32 +244,9 @@ EmergencyBypassNotAuthorised = 131,
     InvariantViolation = 178,
     /// The withdrawal queue has reached its maximum size.
     WithdrawalQueueFull = 179,
-    /// A syndicate pool with this ID already exists.
-    SyndicatePoolExists = 180,
-    /// No syndicate pool found for the given pool ID.
-    SyndicatePoolNotFound = 181,
-    /// Caller is not a member of the referenced syndicate pool.
-    NotSyndicateMember = 182,
-    /// Syndicate pool has no members / zero total stake, so shares cannot be computed.
-    SyndicateEmpty = 183,
-    /// Syndicate proposal not found.
-    SyndicateProposalNotFound = 184,
-    /// Syndicate member has already voted on this proposal.
-    SyndicateAlreadyVoted = 185,
-    /// Syndicate pool is not active (already dissolved/closed).
-    SyndicateNotActive = 186,
-    /// The requested milestone has already been released for this voucher/loan.
-    MilestoneAlreadyReleased = 187,
-    /// The loan has not yet reached the requested milestone.
-    MilestoneNotReached = 188,
-    /// Unknown/out-of-range milestone identifier.
-    InvalidMilestone = 189,
-    /// A recurring payment configuration already exists for this borrower/loan.
-    RecurringPaymentExists = 190,
-    /// No recurring payment configuration found for this borrower.
-    RecurringPaymentNotFound = 191,
-    /// Recurring payment configuration is not currently active.
-    RecurringPaymentInactive = 192,
-    /// The recurring payment is not yet due (next_payment_due is in the future).
-    RecurringPaymentNotDue = 193,
+    /// A vouch split would leave the parent or child vouch below the
+    /// minimum split amount.
+    SplitBelowMinimum = 180,
+    /// A vouch rotation was attempted before the cooling-off period elapsed.
+    RotationCooldownActive = 181,
 }

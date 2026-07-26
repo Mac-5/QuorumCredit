@@ -2,8 +2,7 @@ extern crate alloc;
 
 use crate::errors::ContractError;
 use crate::helpers::{
-    config, has_active_loan, paginate_vec, require_admin_approval, require_allowed_token,
-    require_not_paused, require_not_thawing, require_reads_allowed, require_positive_amount,
+    has_active_loan, paginate_vec, require_admin_approval, require_allowed_token, require_not_thawing, require_reads_allowed, require_positive_amount,
 };
 use crate::types::{
     BatchVouchResult, BorrowerExposure, BridgeRecord, ChainExposure, DataKey, PortfolioRiskReport,
@@ -1584,7 +1583,7 @@ pub fn vouch_reputation_weight(env: &Env, voucher: &Address) -> i128 {
 
     let slashed: u32 = stats.as_ref().map(|s| s.total_vouches_slashed).unwrap_or(0);
     let total_yield_earned: i128 = stats.as_ref().map(|s| s.total_yield_earned).unwrap_or(0);
-    let successful_vouches: u32 = stats.as_ref().map(|s| s.successful_vouches).unwrap_or(0);
+    let _successful_vouches: u32 = stats.as_ref().map(|s| s.successful_vouches).unwrap_or(0);
 
     // ── Minimum-stake floor ──────────────────────────────────────────────
     // If the voucher has not earned at least SYBIL_MIN_STAKE_FOR_REP in aggregate yield,
@@ -1668,7 +1667,7 @@ pub fn invalidate_weighted_stake_cache(env: &Env, borrower: &Address, token: &Ad
 
 /// Invalidates all cached weighted stake values for a borrower (across all tokens).
 /// Used when vouch records for a borrower are completely cleared (e.g., after loan repayment).
-pub fn invalidate_all_stake_caches_for_borrower(env: &Env, borrower: &Address) {
+pub fn invalidate_all_stake_caches_for_borrower(_env: &Env, _borrower: &Address) {
     // Note: In Soroban, there's no efficient way to enumerate and delete all cache entries for a borrower
     // across all tokens. The cache is self-healing: it recomputes on miss if the vouch list has changed.
     // This is a no-op that documents the intent; the invalidation happens implicitly when vouches

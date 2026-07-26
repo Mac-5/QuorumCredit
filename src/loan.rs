@@ -549,7 +549,12 @@ pub fn repay(env: Env, borrower: Address, payment: i128) -> Result<(), ContractE
                 0
             };
 
-            let payout = v.stake + vouch_yield + penalty_share;
+            // Issue #1077: Add liquidity-tier yield bonus on top of the locked-in yield.
+            // Illiquid tokens earn a higher bonus to compensate for risk.
+            let tier_bonus_bps = crate::bridge::liquidity_tier_bonus_bps(&env, &loan.token_address);
+            let tier_yield_extra = v.stake * tier_bonus_bps / BPS_DENOMINATOR;
+
+            let payout = v.stake + vouch_yield + penalty_share + tier_yield_extra;
 
             if payout > 0 {
                 token.transfer(&env.current_contract_address(), &v.voucher, &payout);
@@ -566,7 +571,7 @@ pub fn repay(env: Env, borrower: Address, payment: i128) -> Result<(), ContractE
                     total_slashed: 0,
                 });
             stats.successful_vouches += 1;
-            stats.total_yield_earned += vouch_yield;
+            stats.total_yield_earned += vouch_yield + tier_yield_extra;
             env.storage()
                 .persistent()
                 .set(&DataKey::VoucherStats(v.voucher.clone()), &stats);

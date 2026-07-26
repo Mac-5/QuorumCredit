@@ -1529,6 +1529,10 @@ pub struct Config {
     /// Seconds after repayment during which a borrower is immune from slash votes (0 = disabled).
     pub immunity_period_seconds: u64,
     pub insurance_premium_bps: u32,
+    /// Issue #1077: Per-liquidity-tier yield bonus in basis points.
+    /// Index 0 = Tier 0 (most liquid, no bonus), 3 = Tier 3 (illiquid, max bonus).
+    /// Example: [0, 50, 150, 300] means tier-3 tokens earn +300 bps extra yield.
+    pub liquidity_tier_yield_bonus: Vec<i128>,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────

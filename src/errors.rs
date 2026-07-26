@@ -244,10 +244,9 @@ EmergencyBypassNotAuthorised = 131,
     InvariantViolation = 178,
     /// The withdrawal queue has reached its maximum size.
     WithdrawalQueueFull = 179,
-    /// Gas cost regression detected — current cost exceeds baseline by more than threshold.
-    RegressionDetected = 180,
-    /// Item not found in storage.
-    NotFound = 181,
-    /// Invalid input provided.
-    InvalidInput = 182,
+    /// A vouch split would leave the parent or child vouch below the
+    /// minimum split amount.
+    SplitBelowMinimum = 180,
+    /// A vouch rotation was attempted before the cooling-off period elapsed.
+    RotationCooldownActive = 181,
 }

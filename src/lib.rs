@@ -27,6 +27,9 @@ pub mod detection;
 pub mod archive;
 pub mod ipfs_archive;
 pub mod syndication;
+pub mod vouch_syndication;
+pub mod vouch_milestones;
+pub mod recurring_payment;
 
 #[cfg(test)]
 mod governance_test;
@@ -3038,5 +3041,130 @@ impl QuorumCreditContract {
 
     pub fn is_bridge_nonce_used(env: Env, origin_chain: u32, nonce: u64) -> bool {
         cross_chain::is_bridge_nonce_used(env, origin_chain, nonce)
+    }
+}
+
+// ── Issue #1171: Vouch syndication for risk pooling ────────────────────────────
+
+impl QuorumCreditContract {
+    pub fn create_vouch_syndicate(
+        env: Env,
+        creator: Address,
+        pool_id: u64,
+        token: Address,
+        contributions: Vec<SyndicateContribution>,
+    ) -> Result<(), ContractError> {
+        vouch_syndication::create_vouch_syndicate(env, creator, pool_id, token, contributions)
+    }
+
+    pub fn distribute_syndicate_rewards(env: Env, pool_id: u64) -> Result<(), ContractError> {
+        vouch_syndication::distribute_syndicate_rewards(env, pool_id)
+    }
+
+    pub fn propose_syndicate_action(
+        env: Env,
+        pool_id: u64,
+        proposer: Address,
+        description: String,
+    ) -> Result<u64, ContractError> {
+        vouch_syndication::propose_syndicate_action(env, pool_id, proposer, description)
+    }
+
+    pub fn vote_syndicate_proposal(
+        env: Env,
+        pool_id: u64,
+        proposal_id: u64,
+        voter: Address,
+        approve: bool,
+    ) -> Result<(), ContractError> {
+        vouch_syndication::vote_syndicate_proposal(env, pool_id, proposal_id, voter, approve)
+    }
+
+    pub fn get_syndicate_pool(env: Env, pool_id: u64) -> Option<SyndicatePool> {
+        vouch_syndication::get_syndicate_pool(&env, pool_id)
+    }
+
+    pub fn get_syndicate_member(env: Env, pool_id: u64, member: Address) -> Option<SyndicateMember> {
+        vouch_syndication::get_syndicate_member(env, pool_id, member)
+    }
+
+    pub fn get_syndicate_performance(env: Env, pool_id: u64) -> Option<SyndicatePerformance> {
+        vouch_syndication::get_syndicate_performance(env, pool_id)
+    }
+
+    pub fn get_syndicate_proposal(
+        env: Env,
+        pool_id: u64,
+        proposal_id: u64,
+    ) -> Option<SyndicateProposal> {
+        vouch_syndication::get_syndicate_proposal(env, pool_id, proposal_id)
+    }
+}
+
+// ── Issue #1169: Conditional vouch release on performance milestones ───────────
+
+impl QuorumCreditContract {
+    pub fn release_vouch_at_milestone(
+        env: Env,
+        loan_id: u64,
+        voucher: Address,
+        milestone: LoanMilestone,
+    ) -> Result<i128, ContractError> {
+        vouch_milestones::release_vouch_at_milestone(env, loan_id, voucher, milestone)
+    }
+
+    pub fn get_milestone_achieved(env: Env, loan_id: u64, milestone: LoanMilestone) -> Option<u64> {
+        vouch_milestones::get_milestone_achieved(env, loan_id, milestone)
+    }
+
+    pub fn get_milestone_release(
+        env: Env,
+        loan_id: u64,
+        voucher: Address,
+        milestone: LoanMilestone,
+    ) -> Option<i128> {
+        vouch_milestones::get_milestone_release(env, loan_id, voucher, milestone)
+    }
+}
+
+// ── Issue #1168: Loan repayment automation with recurring transfers ────────────
+
+impl QuorumCreditContract {
+    pub fn setup_recurring_payment(
+        env: Env,
+        borrower: Address,
+        token: Address,
+        amount: i128,
+        frequency_secs: u64,
+        start_date: u64,
+    ) -> Result<(), ContractError> {
+        recurring_payment::setup_recurring_payment(
+            env,
+            borrower,
+            token,
+            amount,
+            frequency_secs,
+            start_date,
+        )
+    }
+
+    pub fn execute_recurring_payment(env: Env, borrower: Address) -> Result<i128, ContractError> {
+        recurring_payment::execute_recurring_payment(env, borrower)
+    }
+
+    pub fn record_recurring_payment_failure(env: Env, borrower: Address) -> Result<u32, ContractError> {
+        recurring_payment::record_recurring_payment_failure(env, borrower)
+    }
+
+    pub fn terminate_recurring_payment(env: Env, borrower: Address) -> Result<(), ContractError> {
+        recurring_payment::terminate_recurring_payment(env, borrower)
+    }
+
+    pub fn get_recurring_payment(env: Env, borrower: Address) -> Option<RecurringPaymentConfig> {
+        recurring_payment::get_recurring_payment(env, borrower)
+    }
+
+    pub fn recurring_payment_success_rate(env: Env, borrower: Address) -> u32 {
+        recurring_payment::recurring_payment_success_rate(env, borrower)
     }
 }

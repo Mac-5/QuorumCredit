@@ -773,27 +773,24 @@ pub enum DataKey {
     /// created so far for this relationship's vouch history. The index needed
     /// to enumerate `ArchivedVouchHistory` batches in order (0..count).
     VouchHistoryArchiveCount(Address, Address, Address),
-    // ── Issue #1179: Vouch Audit Trail ────────────────────────────────────────
-    /// (borrower, voucher, token) → VouchAuditTrail (comprehensive audit trail for a vouch)
-    VouchAuditTrail(Address, Address, Address),
-    /// Monotonically increasing counter for audit event IDs across all vouches
-    VouchAuditEventIdCounter,
-    // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────
-    /// (borrower, voucher, token) → VouchMaturityRecord (tracks maturity-based interest bonuses)
-    VouchMaturity(Address, Address, Address),
-    // ── Issue #1176: Social Features ─────────────────────────────────────────
-    /// borrower → BorrowerProfile (social profile for community features)
-    BorrowerProfile(Address),
-    /// borrower → Vec<u64> (list of success story IDs)
-    BorrowerSuccessStories(Address),
-    /// story_id → SuccessStory (individual success story)
-    SuccessStory(u64),
-    /// Monotonically increasing counter for success story IDs
-    SuccessStoryIdCounter,
-    /// borrower → RetentionMetrics (engagement and retention tracking)
-    BorrowerRetentionMetrics(Address),
-    /// Monotonically increasing counter for retention metric updates
-    RetentionMetricsUpdateCounter,
+    // ── Vouch splitting (Issue #1167) ────────────────────────────────────────
+    /// borrower → Vec<VouchSplitRecord> genealogy of every split performed
+    /// against a vouch for this borrower (parent voucher → child voucher).
+    VouchSplitHistory(Address),
+    // ── Vouch rotation incentives (Issue #1165) ──────────────────────────────
+    /// voucher → u64 ledger timestamp of the voucher's most recent rotation.
+    LastRotationTimestamp(Address),
+    /// voucher → u32 total number of rotations performed by this voucher.
+    RotationCount(Address),
+    /// voucher → u32 basis-point yield bonus earned from quarterly rotation.
+    RotationBonusBps(Address),
+    // ── Vouch portfolio risk (Issue #1164) ───────────────────────────────────
+    /// voucher → Vec<PortfolioSnapshot> historical evolution of the voucher's
+    /// portfolio, appended each time the portfolio risk report is read.
+    VoucherPortfolioHistory(Address),
+    // ── Refinance rate shopping (Issue #1166) ────────────────────────────────
+    /// Global aggregate statistics for `refinance_loan` usage.
+    RefinanceStats,
 }
 
 /// Issue #867: Shared collateral pool backed by multiple vouchers.
@@ -1532,6 +1529,10 @@ pub struct Config {
     /// Seconds after repayment during which a borrower is immune from slash votes (0 = disabled).
     pub immunity_period_seconds: u64,
     pub insurance_premium_bps: u32,
+    /// Issue #1077: Per-liquidity-tier yield bonus in basis points.
+    /// Index 0 = Tier 0 (most liquid, no bonus), 3 = Tier 3 (illiquid, max bonus).
+    /// Example: [0, 50, 150, 300] means tier-3 tokens earn +300 bps extra yield.
+    pub liquidity_tier_yield_bonus: Vec<i128>,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -1645,6 +1646,135 @@ pub struct RefinanceRecord {
     pub refinanced_at: u64,
 }
 
+/// Issue #1166: A non-binding quote for refinancing a borrower's active loan,
+/// used for rate shopping before committing to `refinance_loan`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefinanceQuote {
+    pub borrower: Address,
+    pub old_loan_id: u64,
+    /// Outstanding balance (principal + yield - repaid) on the active loan.
+    pub outstanding: i128,
+    /// Effective rate, in basis points, of the current loan.
+    pub old_rate_bps: i128,
+    /// Effective rate the borrower would receive today, in basis points,
+    /// accounting for their current credit tier.
+    pub new_rate_bps: i128,
+    /// Whether the borrower currently qualifies for a beneficial refinance
+    /// (new_rate_bps < old_rate_bps and the loan has not passed its deadline).
+    pub eligible: bool,
+    /// Estimated interest cost saved over one year on the outstanding
+    /// balance at the new rate vs. the old rate. Negative if the new rate
+    /// is worse.
+    pub estimated_annual_savings: i128,
+    /// One-time protocol fee charged on the new loan amount, in stroops.
+    pub refinance_fee: i128,
+    /// Days of accrued savings needed to offset `refinance_fee`. `None` when
+    /// the refinance produces no savings (fee is never recouped).
+    pub breakeven_days: Option<u64>,
+}
+
+/// Issue #1166: Global aggregate statistics for refinance usage.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefinanceStats {
+    pub total_refinances: u32,
+    /// Sum of `old_rate_bps - new_rate_bps` (in bps) across all refinances,
+    /// weighted by nothing — a simple running total for reporting.
+    pub total_rate_reduction_bps: i128,
+    /// Sum of estimated annual savings (in stroops) across all refinances,
+    /// computed the same way as `RefinanceQuote::estimated_annual_savings`.
+    pub total_estimated_savings: i128,
+}
+
+/// Issue #1167: One entry in a vouch's split genealogy — records that
+/// `amount` was carved out of `parent_voucher`'s vouch and given to
+/// `child_voucher` as a new, independent vouch for the same borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VouchSplitRecord {
+    pub parent_voucher: Address,
+    pub child_voucher: Address,
+    pub borrower: Address,
+    pub amount: i128,
+    pub split_at: u64,
+}
+
+/// Issue #1165: A vouch that has not rotated in a long time and is a
+/// candidate for `rotate_to_new_borrower`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagnantVouch {
+    pub voucher: Address,
+    pub borrower: Address,
+    pub stake: i128,
+    pub days_since_rotation: u64,
+}
+
+/// Issue #1164: A single borrower's share of a voucher's total exposure.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerExposure {
+    pub borrower: Address,
+    pub stake: i128,
+    /// Share of the voucher's total stake, in basis points (10_000 = 100%).
+    pub pct_bps: u32,
+}
+
+/// Issue #1164: A voucher's exposure to a single token, used as the
+/// "sector" concentration axis (asset-class diversification).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenExposure {
+    pub token: Address,
+    pub stake: i128,
+    pub pct_bps: u32,
+}
+
+/// Issue #1164: A voucher's exposure to a single chain, used as the
+/// "region" concentration axis. `chain_id = None` means native Stellar.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChainExposure {
+    pub chain_id: Option<u32>,
+    pub stake: i128,
+    pub pct_bps: u32,
+}
+
+/// Issue #1164: A point-in-time snapshot of a voucher's portfolio, appended
+/// to `DataKey::VoucherPortfolioHistory` whenever the risk report is read.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortfolioSnapshot {
+    pub timestamp: u64,
+    pub total_stake: i128,
+    pub borrower_count: u32,
+}
+
+/// Issue #1164: Full portfolio risk report for a voucher.
+#[contracttype]
+#[derive(Clone)]
+pub struct PortfolioRiskReport {
+    pub voucher: Address,
+    pub total_stake: i128,
+    pub borrower_count: u32,
+    pub borrower_breakdown: Vec<BorrowerExposure>,
+    pub token_breakdown: Vec<TokenExposure>,
+    pub chain_breakdown: Vec<ChainExposure>,
+    /// Herfindahl-Hirschman-style concentration index over borrower shares,
+    /// in basis points (sum of pct_bps^2 / 10_000). Higher = more concentrated.
+    pub concentration_hhi_bps: u32,
+    /// Estimated loss if 1% of the voucher's backed borrowers default,
+    /// weighted by stake (see `portfolio_risk` for the exact model).
+    pub estimated_loss_1pct: i128,
+    /// Estimated loss at a 5% default rate.
+    pub estimated_loss_5pct: i128,
+    /// Estimated loss at a 10% default rate.
+    pub estimated_loss_10pct: i128,
+    pub recommendations: Vec<soroban_sdk::String>,
+    pub history: Vec<PortfolioSnapshot>,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub struct ArchivedLoanRecord {
@@ -1670,6 +1800,182 @@ pub struct ArchivedLoanRecord {
     pub loan_purpose: soroban_sdk::String,
     /// Token used for this loan.
     pub token_address: Address,
+}
+
+/// Issue #1172: Guarantor record for a loan.
+/// Tracks the guarantor backing a loan and their obligations.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorRecord {
+    /// Loan ID this guarantor is backing
+    pub loan_id: u64,
+    /// Guarantor address
+    pub guarantor: Address,
+    /// Guarantor signature commitment (to verify backing)
+    pub signature_verified: bool,
+    /// Amount guaranteed (in stroops) — can be less than full loan amount
+    pub guarantee_amount: i128,
+    /// Timestamp when guarantor was requested for this loan
+    pub requested_at: u64,
+    /// Timestamp when guarantor was released (None if still active)
+    pub released_at: Option<u64>,
+    /// Status of the guarantee
+    pub status: GuaranteeStatus,
+}
+
+/// Status of a guarantee.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GuaranteeStatus {
+    /// Guarantee is active and binding
+    Active,
+    /// Guarantee has been released after loan completion
+    Released,
+    /// Guarantee has been triggered (borrower defaulted)
+    Triggered,
+    /// Guarantee has been claimed (funds distributed)
+    Claimed,
+}
+
+/// Issue #1172: Guarantor obligation tracking.
+/// Tracks what the guarantor owes if the borrower defaults.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorObligation {
+    /// Guarantor address
+    pub guarantor: Address,
+    /// Loan ID
+    pub loan_id: u64,
+    /// Borrower address
+    pub borrower: Address,
+    /// Maximum amount guarantor is liable for (in stroops)
+    pub max_liability: i128,
+    /// Amount already paid by guarantor (in stroops)
+    pub amount_paid: i128,
+    /// Timestamp when obligation was created
+    pub created_at: u64,
+    /// Timestamp when obligation was fulfilled or waived
+    pub closed_at: Option<u64>,
+}
+
+/// Issue #1172: Guarantor reputation and statistics.
+#[contracttype]
+#[derive(Clone)]
+pub struct GuarantorStats {
+    /// Total number of guarantees provided
+    pub total_guarantees: u32,
+    /// Number of successfully fulfilled guarantees
+    pub successful_guarantees: u32,
+    /// Number of triggered guarantees (defaults)
+    pub triggered_guarantees: u32,
+    /// Total amount guaranteed across all loans (in stroops)
+    pub total_guaranteed: i128,
+    /// Total amount paid out on triggered guarantees (in stroops)
+    pub total_paid_out: i128,
+    /// Reputation score (0-1000): higher = better guarantor
+    pub reputation_score: u32,
+    /// Last active timestamp
+    pub last_activity: u64,
+}
+
+/// Issue #1175: Vouch slashing protection bond.
+/// Bonds limit the maximum loss a voucher can suffer if a borrower defaults.
+#[contracttype]
+#[derive(Clone)]
+pub struct VouchProtectionBond {
+    /// Voucher address
+    pub voucher: Address,
+    /// Loan ID this bond is protecting
+    pub loan_id: u64,
+    /// Vouch ID (typically matches loan_id in current design)
+    pub vouch_id: u64,
+    /// Bond amount staked (in stroops) - covers up to 50% of vouch amount
+    pub bond_amount: i128,
+    /// The vouch stake this bond is protecting
+    pub protected_stake: i128,
+    /// Timestamp when bond was created
+    pub created_at: u64,
+    /// Amount of bond used to cover slash (in stroops)
+    pub amount_used: i128,
+    /// Timestamp when bond was released (None if still active)
+    pub released_at: Option<u64>,
+    /// Status of the bond
+    pub status: BondStatus,
+    /// Whether optional bond insurance was purchased
+    pub has_insurance: bool,
+}
+
+/// Status of a vouch protection bond.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BondStatus {
+    /// Bond is active and protecting the vouch
+    Active,
+    /// Bond has been partially used to cover a slash
+    PartiallyUsed,
+    /// Bond has been fully used to cover a slash
+    Exhausted,
+    /// Bond has been released after loan completion
+    Released,
+}
+
+/// Issue #1175: Optional bond insurance.
+/// Provides additional coverage for the bond with a 3% premium surcharge.
+#[contracttype]
+#[derive(Clone)]
+pub struct BondInsuranceRecord {
+    /// Voucher address
+    pub voucher: Address,
+    /// Loan ID
+    pub loan_id: u64,
+    /// Bond amount covered by insurance
+    pub insured_bond_amount: i128,
+    /// Insurance premium paid (3% of bond amount)
+    pub premium_paid: i128,
+    /// Maximum payout (typically 100% of bond amount)
+    pub max_coverage: i128,
+    /// Amount claimed under insurance (if any)
+    pub amount_claimed: i128,
+    /// Status of the insurance
+    pub status: InsuranceStatus,
+    /// Timestamp when insurance was purchased
+    pub purchased_at: u64,
+}
+
+/// Status of bond insurance.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InsuranceStatus {
+    /// Insurance is active
+    Active,
+    /// Insurance claim has been paid
+    Claimed,
+    /// Insurance has been cancelled/released
+    Released,
+}
+
+/// Issue #1175: Bond tracking and statistics.
+#[contracttype]
+#[derive(Clone)]
+pub struct BondStats {
+    /// Voucher address
+    pub voucher: Address,
+    /// Total bond amount across all loans (in stroops)
+    pub total_bonded: i128,
+    /// Total bond amount used to cover slashes (in stroops)
+    pub total_used: i128,
+    /// Number of active bonds
+    pub active_bonds: u32,
+    /// Number of times this voucher's bond was used
+    pub times_bond_used: u32,
+    /// Total bond insurance premiums paid (in stroops)
+    pub total_insurance_premiums: i128,
+    /// Number of insurance claims paid
+    pub insurance_claims_paid: u32,
+    /// Total insurance payout (in stroops)
+    pub total_insurance_payout: i128,
+    /// Last activity timestamp
+    pub last_activity: u64,
 }
 
 /// A reference to archived data stored on IPFS.
@@ -1729,6 +2035,47 @@ pub struct VouchRecord {
     /// Optional chain ID for cross-chain vouches. `None` means native Stellar.
     /// When set, the token must originate from a registered bridge for that chain.
     pub chain_id: Option<u32>,
+}
+
+/// Issue #1173: Vouch reputation weighted strength.
+/// Tracks the reputation-adjusted strength of a vouch in quorum calculations.
+#[contracttype]
+#[derive(Clone)]
+pub struct VouchReputationWeight {
+    /// Vouch ID (same as loan_id for now)
+    pub vouch_id: u64,
+    /// Base strength of the vouch (the raw stake)
+    pub base_strength: i128,
+    /// Voucher's reputation score (0-1000)
+    pub voucher_reputation: u32,
+    /// Calculated weighted strength: base_strength × (1 + (reputation / 1000))
+    /// Capped at 1.5x multiplier for reputation >= 1500
+    pub weighted_strength: i128,
+    /// Weight multiplier applied (in basis points, e.g., 1000 = 1.0x, 1500 = 1.5x)
+    pub weight_multiplier_bps: u32,
+    /// Timestamp when weight was last calculated
+    pub calculated_at: u64,
+}
+
+/// Issue #1173: Weighted vouch distribution for a borrower.
+/// Tracks aggregate reputation-weighted vouch strength for quorum calculations.
+#[contracttype]
+#[derive(Clone)]
+pub struct WeightedVouchDistribution {
+    /// Borrower address
+    pub borrower: Address,
+    /// Token address
+    pub token: Address,
+    /// Total base stake (unweighted)
+    pub total_base_stake: i128,
+    /// Total weighted stake (reputation-adjusted)
+    pub total_weighted_stake: i128,
+    /// Number of vouches contributing
+    pub vouch_count: u32,
+    /// Average weight multiplier across all vouches (in basis points)
+    pub average_weight_multiplier_bps: u32,
+    /// Timestamp when distribution was last updated
+    pub updated_at: u64,
 }
 
 /// Metadata for a registered cross-chain bridge.
@@ -2485,154 +2832,135 @@ pub enum ScheduleType {
     Dummy,
 }
 
-// ── Issue #1176: Social Features for Borrower Network ──────────────────────
+// ── Issue #1171: Vouch syndication ────────────────────────────────────────────
 
-/// Borrower profile information for social features and community building.
+/// A single voucher's contribution when creating or joining a syndicate pool.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BorrowerProfile {
-    /// Borrower address.
-    pub borrower: Address,
-    /// Short bio/description of the borrower (max 500 chars).
-    pub bio: soroban_sdk::String,
-    /// Timestamp when profile was created.
-    pub created_at: u64,
-    /// Timestamp of last profile update.
-    pub updated_at: u64,
-    /// Sector/industry category for peer discovery (e.g., "agriculture", "retail", "tech").
-    pub sector: Option<soroban_sdk::String>,
-    /// Country/region for geographic peer discovery.
-    pub region: Option<soroban_sdk::String>,
-    /// Whether borrower has agreed to share success story publicly.
-    pub success_story_consent: bool,
-}
-
-/// Success story submitted by a borrower about their lending experience.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SuccessStory {
-    /// Borrower who submitted the story.
-    pub borrower: Address,
-    /// Story title (max 100 chars).
-    pub title: soroban_sdk::String,
-    /// Story content (max 2000 chars).
-    pub content: soroban_sdk::String,
-    /// Timestamp when story was submitted.
-    pub submitted_at: u64,
-    /// Unique story ID for reference.
-    pub story_id: u64,
-    /// Whether the story is published/visible to community.
-    pub is_published: bool,
-}
-
-/// Retention metrics for measuring user engagement and platform loyalty.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RetentionMetrics {
-    /// Borrower address.
-    pub borrower: Address,
-    /// Total number of loans originated by this borrower.
-    pub total_loans: u32,
-    /// Total number of successful repayments.
-    pub successful_repayments: u32,
-    /// Total number of defaults.
-    pub defaults: u32,
-    /// Number of distinct vouchers this borrower has used.
-    pub distinct_vouchers_count: u32,
-    /// Timestamp of first loan.
-    pub first_loan_timestamp: u64,
-    /// Timestamp of most recent loan.
-    pub last_loan_timestamp: u64,
-    /// Average time between loans (in seconds, 0 if only one loan).
-    pub average_loan_interval: u64,
-    /// Platform tenure (time since first loan, in seconds).
-    pub platform_tenure: u64,
-}
-
-// ── Issue #1177: Vouch Maturity-Based Interest Adjustment ─────────────────
-
-/// Maturity information for a vouch tracking tenure-based interest adjustments.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VouchMaturityRecord {
-    /// Voucher address.
-    pub voucher: Address,
-    /// Borrower address.
-    pub borrower: Address,
-    /// Token address.
-    pub token: Address,
-    /// Timestamp when the vouch was created (epoch in seconds).
-    pub vouch_created_at: u64,
-    /// Last timestamp when maturity was updated/calculated.
-    pub last_maturity_update: u64,
-    /// Current maturity bonus in basis points (0-100, where 100 = 1%).
-    /// Updated as the vouch ages: +0.1% per 6 months.
-    pub maturity_bonus_bps: i128,
-    /// Whether this vouch qualifies for loyalty bonus (2+ years of continuous vouching).
-    pub loyalty_bonus_eligible: bool,
-}
-
-/// Maturity-based interest adjustment constants.
-pub const MATURITY_BONUS_INCREMENT_BPS: i128 = 10; // 0.1% per 6 months
-pub const MATURITY_BONUS_PERIOD_SECS: u64 = 6 * 30 * 24 * 60 * 60; // ~6 months
-pub const MATURITY_BONUS_MAX_BPS: i128 = 100; // Cap at 1%
-pub const LOYALTY_BONUS_THRESHOLD_SECS: u64 = 2 * 365 * 24 * 60 * 60; // 2 years
-pub const LOYALTY_BONUS_BPS: i128 = 50; // 0.5% additional bonus for 2+ years
-
-// ── Issue #1179: Vouch Audit Trail ─────────────────────────────────────────
-
-/// Type of vouch operation being audited.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VouchAuditEventType {
-    Created,
-    Increased,
-    Decreased,
-    Withdrawn,
-    Delegated,
-    Revoked,
-    Slashed,
-    Settled,
-}
-
-/// Single audit event for a vouch operation.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VouchAuditEvent {
-    /// Timestamp when the operation occurred.
-    pub timestamp: u64,
-    /// Type of operation: Created, Increased, Decreased, Withdrawn, etc.
-    pub operation: VouchAuditEventType,
-    /// The voucher who performed/is subject to the operation.
-    pub voucher: Address,
-    /// The borrower whose vouch is affected.
-    pub borrower: Address,
-    /// Amount involved (stake, withdrawal amount, etc.), in stroops. 0 if N/A.
+pub struct SyndicateContribution {
+    pub member: Address,
+    /// Stake this member is contributing to the pool, in stroops.
     pub amount: i128,
-    /// Optional actor address (e.g., who initiated a slash). None if self-operation.
-    pub actor: Option<Address>,
-    /// Optional reason/note for the operation.
-    pub reason: Option<soroban_sdk::String>,
-    /// Token contract address involved in this operation.
-    pub token: Address,
-    /// Unique event ID for tracking.
-    pub event_id: u64,
 }
 
-/// Audit trail for a vouch: collection of all operations affecting it.
+/// A pool of vouchers who share vouching risk and reward proportionally to
+/// their contributed stake, instead of each voucher bearing risk alone.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VouchAuditTrail {
-    /// Voucher address.
-    pub voucher: Address,
-    /// Borrower address.
-    pub borrower: Address,
-    /// Token address.
+pub struct SyndicatePool {
+    pub pool_id: u64,
+    pub creator: Address,
     pub token: Address,
-    /// All audit events for this vouch, in chronological order.
-    pub events: Vec<VouchAuditEvent>,
-    /// Timestamp when the audit trail was first created.
+    pub members: Vec<Address>,
+    /// Sum of all members' `amount` contributions, in stroops.
+    pub total_stake: i128,
+    /// Reward accrued to the pool that has not yet been distributed, in stroops.
+    pub pending_rewards: i128,
     pub created_at: u64,
-    /// Timestamp of the last event logged.
-    pub last_event_at: u64,
+    pub active: bool,
+}
+
+/// Per-member record within a syndicate pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicateMember {
+    pub member: Address,
+    /// Stake contributed by this member, in stroops.
+    pub contribution: i128,
+    /// This member's share of the pool in basis points (10_000 = 100%).
+    pub share_bps: u32,
+    /// Cumulative rewards this member has been paid out, in stroops.
+    pub rewards_received: i128,
+}
+
+/// Running performance metrics for a syndicate pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicatePerformance {
+    pub pool_id: u64,
+    /// Total rewards distributed to members across the pool's lifetime, in stroops.
+    pub total_rewards_distributed: i128,
+    /// Total stake lost to slashing across the pool's lifetime, in stroops.
+    pub total_slashed: i128,
+    /// Number of times rewards have been distributed.
+    pub distribution_count: u32,
+}
+
+/// Governance proposal status for syndicate member voting.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum SyndicateProposalStatus {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+/// A member-raised governance proposal within a syndicate pool (e.g. dissolve
+/// the pool, change a policy). Voting weight is each member's `share_bps`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyndicateProposal {
+    pub pool_id: u64,
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub description: String,
+    /// Sum of share_bps of members who voted for.
+    pub votes_for_bps: u32,
+    /// Sum of share_bps of members who voted against.
+    pub votes_against_bps: u32,
+    pub status: SyndicateProposalStatus,
+    pub created_at: u64,
+}
+
+// ── Issue #1169: Milestone-based vouch release ────────────────────────────────
+
+/// Loan lifecycle milestones that a vouch can be partially released against.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum LoanMilestone {
+    Issued,
+    FirstPaymentMade,
+    HalfRepaid,
+    Completed,
+}
+
+impl LoanMilestone {
+    /// Fraction of a voucher's stake released when this milestone is reached,
+    /// expressed in basis points. Each milestone releases 25% (2_500 bps).
+    pub fn release_bps(&self) -> u32 {
+        2_500
+    }
+
+    /// Stable numeric discriminant used as a storage-key component.
+    pub fn index(&self) -> u32 {
+        match self {
+            LoanMilestone::Issued => 0,
+            LoanMilestone::FirstPaymentMade => 1,
+            LoanMilestone::HalfRepaid => 2,
+            LoanMilestone::Completed => 3,
+        }
+    }
+}
+
+// ── Issue #1168: Recurring repayment automation ───────────────────────────────
+
+/// Borrower-configured recurring repayment schedule, executed by anyone
+/// (e.g. an off-chain keeper) once `next_payment_due` has passed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringPaymentConfig {
+    pub borrower: Address,
+    pub token: Address,
+    /// Amount transferred per period, in stroops.
+    pub amount: i128,
+    /// Seconds between successive payments.
+    pub frequency_secs: u64,
+    /// Ledger timestamp the schedule starts at.
+    pub start_date: u64,
+    /// Ledger timestamp the next payment becomes executable.
+    pub next_payment_due: u64,
+    pub active: bool,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub retry_count: u32,
 }

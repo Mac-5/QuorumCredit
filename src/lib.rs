@@ -61,6 +61,7 @@ pub mod vouch_milestones;
 pub mod recurring_payment;
 pub mod loan_priority;
 pub mod audit_verification;
+pub mod large_loan_approval;
 
 #[cfg(test)]
 mod governance_test;
@@ -1570,6 +1571,52 @@ impl QuorumCreditContract {
         proposal_id: u64,
     ) -> Result<bool, ContractError> {
         loan_priority::approve_priority_change(env, approver, proposal_id)
+    }
+
+    // ── Large Loan Multi-Signature Approval ───────────────────────────────────
+
+    /// Governance-set threshold above which loans require 2-of-3 admin multi-sig.
+    pub fn set_large_loan_threshold(
+        env: Env,
+        admin_signers: Vec<Address>,
+        threshold: i128,
+    ) -> Result<(), ContractError> {
+        large_loan_approval::set_large_loan_threshold(env, admin_signers, threshold)
+    }
+
+    pub fn get_large_loan_threshold(env: Env) -> i128 {
+        large_loan_approval::get_large_loan_threshold(env)
+    }
+
+    /// Queue a large loan for multi-signature approval (48h expiration window).
+    pub fn propose_large_loan_approval(
+        env: Env,
+        proposer: Address,
+        loan_id: u64,
+        borrower: Address,
+        amount: i128,
+    ) -> Result<u64, ContractError> {
+        large_loan_approval::propose_large_loan_approval(env, proposer, loan_id, borrower, amount)
+    }
+
+    /// Add an admin signature to a pending large-loan approval proposal.
+    pub fn sign_large_loan_approval(
+        env: Env,
+        signer: Address,
+        approval_id: u64,
+    ) -> Result<bool, ContractError> {
+        large_loan_approval::sign_large_loan_approval(env, signer, approval_id)
+    }
+
+    pub fn is_large_loan_approved(env: Env, approval_id: u64) -> bool {
+        large_loan_approval::is_large_loan_approved(env, approval_id)
+    }
+
+    pub fn get_large_loan_approval(
+        env: Env,
+        approval_id: u64,
+    ) -> Option<large_loan_approval::LargeLoanApproval> {
+        large_loan_approval::get_large_loan_approval(env, approval_id)
     }
 
     // ── Issue #1177: Vouch Maturity-Based Interest Adjustment ────────────────

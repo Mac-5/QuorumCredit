@@ -98,7 +98,7 @@ fn purpose(env: &Env) -> String {
 fn do_vouch(s: &Setup, borrower: &Address, stake: i128) -> Address {
     let voucher = Address::generate(&s.env);
     StellarAssetClient::new(&s.env, &s.token).mint(&voucher, &stake);
-    s.client.vouch(&voucher, borrower, &stake, &s.token);
+    s.client.vouch(&voucher, borrower, &stake, &s.token, &None);
     voucher
 }
 
